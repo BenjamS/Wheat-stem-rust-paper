@@ -1,0 +1,2586 @@
+---
+  title: "A multi-market economic assessment of the potential impact of wheat stem rust on global agricultural supply, demand, and food security"
+author: "Benjamin Schiek, Thanasis Petsakos (tbc: Dave Hodson, Nicola, Tim Sulser, Keith Weibe)"
+date: "`r Sys.Date()`"
+bibliography: WSR IMPACT references.bib
+numbersections: true
+output:
+  word_document:
+  toc: true
+header-includes:
+  - \usepackage{float}
+- \floatplacement{figure}{H}
+---
+  
+  Abstract:
+  
+  Wheat stem rust, a highly virulent fungal disease once thought to be eradicated from the planet, reemerged in Uganda in 1999 and has been spreading steadily ever since. Wheat experts warn that the disease could pose a catastrophic threat to the global wheat supply if left unchecked. Published assessments of the potential impacts of the disease vary widely in method and results, and generally focus on wheat production alone, without considering how markets may offset or aggravate impacts (spillover effects). Here we present a novel "bioeconomic" approach combining biophysical yield modeling with a global agricultural multi-market equilibrium model to account for direct and indirect impacts through spillover effects. Expected yield shocks and outbreak frequencies due to wheat stem rust are elicited from 11 wheat experts, covering 65 countries, and fed into the bioeconomic ensemble. The results suggest that global market incentives may largely offset the adverse effects of wheat stem rust in most outbreak areas via international trade. However, the market mechanism simultaneously precipitates considerable food insecurity in areas where experts expect little or no wheat stem rust, as farms in these areas reallocate resources from the domestic non-wheat market to the export wheat market, in response to price signals.
+
+
+Keywords: Wheat stem rust, plant pests and pathogens, economic equilibrium, ex-ante impact assessment
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      message = FALSE,
+                      warning = FALSE)
+library(tidyverse)
+library(patchwork)
+library(kableExtra)
+# library(raster)
+# library(rgdal)
+library(flextable)
+# library(officer)
+library(ggrepel)
+# library("readxl")
+#===========================================================================
+shift_legend2 <- function(p) {
+  # ...
+  # to grob
+  gp <- ggplotGrob(p)
+  facet.panels <- grep("^panel", gp[["layout"]][["name"]])
+  empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]]))
+  empty.facet.panels <- facet.panels[empty.facet.panels]
+  
+  # establish name of empty panels
+  empty.facet.panels <- gp[["layout"]][empty.facet.panels, ]
+  names <- empty.facet.panels$name
+  # example of names:
+  #[1] "panel-3-2" "panel-3-3"
+  
+  # now we just need a simple call to reposition the legend
+  #lemon::reposition_legend(p, 'center', panel=names)
+  p_out <- lemon::reposition_legend(p, 'center', panel=names)
+  #class(lemon::reposition_legend(p, 'center', panel=names))
+  return(p_out)
+}
+#===========================================================================
+
+```
+
+
+```{r, echo=FALSE}
+
+#=============================================================================
+# Define function to process df
+process_df <- function(this_df, this_commodVec, paramVec){
+  # We want HH demand disaggregated by rural, urban
+  this_df <- subset(this_df, impactparameter != "QFXAgg -- Household Demand")
+  this_df$impactparameter <- gsub("^.*\\-- ", "", this_df$impactparameter)
+  # this_df$Region <- gsub("\\-.*", "", this_df$Country)
+  # this_df$Country <- gsub("^.*\\-", "", this_df$Country)
+  this_df$impactparameter <- gsub("Total ", "", this_df$impactparameter)
+  this_df$impactparameter[which(this_df$impactparameter == "Demand")] <- "Total Demand"
+  this_df$impactparameter <- gsub("PopulationAtRiskXagg - ", "", this_df$impactparameter)
+  this_df$impactparameter[grep("PcKcal", this_df$impactparameter)] <- "Availability\n(kcal/capita/day)"
+  this_df$impactparameter <- gsub("Malnurished", "Undernourished", this_df$impactparameter)
+  
+  this_df$region[which(this_df$region == "SSA")] <- "Africa South\nof the Sahara"
+  this_df$region[which(this_df$region == "SAS")] <- "South Asia"
+  this_df$region[which(this_df$region == "NAM")] <- "N. America"
+  this_df$region[which(this_df$region == "MEN")] <- "West Asia &\nNorth Africa"
+  this_df$region[which(this_df$region == "LAC")] <- "Latin America\n& Caribbean"
+  this_df$region[which(this_df$region == "FSU")] <- "Former USSR"
+  this_df$region[which(this_df$region == "EUR")] <- "Europe"
+  this_df$region[which(this_df$region == "EAP")] <- "East Asia &\nPacific"
+  this_df$region[which(this_df$region == "WLD")] <- "World"
+  # #---
+  # these_systems <- c("-", "total", "Urban", "rural")
+  # #---
+  # this_df <- subset(this_df, productiontype %in% these_systems)
+  # #---
+  # Create total kcal/capita/day
+  # this_dfKcal <- subset(this_df, impactparameter == "Availability\n(kcal/capita/day)" &
+  #                         commodity %in% c("CER", "OLS", "AllA", "R&T",
+  #                                          "F&V", "PUL", "SGR"))
+  # this_dfKcal <- this_dfKcal %>% group_by(impactparameter, scenario, region, productiontype, year) %>% summarise(Val = sum(Val)) %>% as.data.frame()
+  # this_dfKcal$commodity <- "Total kcal/capita/day"
+  # this_dfKcal <- this_dfKcal[, colnames(this_df)]
+  #---
+  #  this_df <- subset(this_df, commodity %in% this_commodVec)
+  #---
+  # Disaggregate HH demand into rural and urban
+  ind_HHdemRur <- which(this_df$impactparameter == "Household Demand" &
+                          this_df$productiontype == "rural")
+  ind_HHdemUrb <- which(this_df$impactparameter == "Household Demand" &
+                          this_df$productiontype == "Urban")
+  this_df$impactparameter[ind_HHdemRur] <- "HH Demand Rural"
+  this_df$impactparameter[ind_HHdemUrb] <- "HH Demand Urban"
+  #---
+  # Create "other cereals" commodity
+  if("CER" %in% this_commodVec){
+    these_CERs <- this_commodVec[grep("CER", this_commodVec)]
+    this_dfCER <- subset(this_df, commodity %in% these_CERs)
+    this_df <- subset(this_df, !(commodity %in% these_CERs))
+    this_dfCER <- this_dfCER %>% spread(commodity, Val)
+    these_cols <- which(colnames(this_dfCER) != "CER")
+    these_cols <- these_cols[these_cols > 6]
+    if(length(these_cols) > 1){
+      this_dfCER$`Other cereals` <- this_dfCER$CER - rowSums(this_dfCER[, these_cols])
+    }else{
+      this_dfCER$`Other cereals` <- this_dfCER$CER - this_dfCER[, these_cols]
+    }
+    this_dfCER$CER <- NULL
+    
+    gathercols <- colnames(this_dfCER)[6:ncol(this_dfCER)]
+    this_dfCER <- this_dfCER %>% gather_("commodity", "Val", gathercols)
+    this_dfCER <- this_dfCER[, colnames(this_df)]
+    
+    ind_otherCer <- which(this_dfCER$commodity == "Other cereals")
+    ind_yd <- which(this_dfCER$impactparameter == "Yield")
+    ind_rm <- intersect(ind_otherCer, ind_yd)
+    this_dfCER <- this_dfCER[-ind_rm, ]
+    
+    this_dfotherCERYd <- subset(this_dfCER, impactparameter %in% c("Area", "Production") & commodity == "Other cereals")
+    #this_dfCER <- subset(this_dfCER, impactparameter != "Yield")
+    this_dfotherCERYd$productiontype <- NULL
+    this_dfotherCERYd <- this_dfotherCERYd %>% spread(impactparameter, Val)
+    this_dfotherCERYd$Val <- this_dfotherCERYd$Production / this_dfotherCERYd$Area
+    this_dfotherCERYd$productiontype <- "total"
+    this_dfotherCERYd$impactparameter <- "Yield"
+    this_dfotherCERYd <- this_dfotherCERYd[, colnames(this_dfCER)]
+    this_dfCER <- rbind(this_dfCER, this_dfotherCERYd)
+    
+    
+  }
+  #---
+  # # Create "other pulses"
+  # these_PULs <- these_commods[grep("PUL", these_commods)]
+  # if(length(these_PULs) != 1){
+  #   this_dfPUL <- subset(this_df, Commodity %in% these_PULs)
+  #   this_df <- subset(this_df, !(Commodity %in% these_PULs))
+  #   this_dfPUL <- this_dfPUL %>% spread(Commodity, Val)
+  #   these_cols <- which(colnames(this_dfPUL) != "PUL")
+  #   these_cols <- these_cols[these_cols > 6]
+  #   if(length(these_cols)  >  1){
+  #     this_dfPUL$`Other pulses` <- this_dfPUL$PUL - rowSums(this_dfPUL[, these_cols])
+  #   }else{
+  #     this_dfPUL$`Other pulses` <- this_dfPUL$PUL - this_dfPUL[, these_cols]
+  #   }
+  #   this_dfPUL$PUL <- NULL
+  #   gathercols <- colnames(this_dfPUL)[7:ncol(this_dfPUL)]
+  #   this_dfPUL <- this_dfPUL %>% gather_("Commodity", "Val", gathercols)
+  #   this_dfPUL <- this_dfPUL[, colnames(this_df)]
+  #   
+  # }else{
+  #   this_dfPUL <- NULL
+  # }
+  # #---
+  # # Create "other roots & tubers"
+  # these_RnTs <- these_commods[grep("R&T", these_commods)]
+  # if(length(these_RnTs) != 1){
+  #   this_dfRnT <- subset(this_df, Commodity %in% these_RnTs)
+  #   this_df <- subset(this_df, !(Commodity %in% these_RnTs))
+  #   this_dfRnT <- this_dfRnT %>% spread(Commodity, Val)
+  #   these_cols <- which(colnames(this_dfRnT) != "R&T")
+  #   these_cols <- these_cols[these_cols > 6]
+  #   if(length(these_cols) > 1){
+  #     this_dfRnT$`Other roots\n& tubers` <- this_dfRnT$`R&T` - rowSums(this_dfRnT[, these_cols])
+  #   }else{
+  #     this_dfRnT$`Other roots\n& tubers` <- this_dfRnT$`R&T` - this_dfRnT[, these_cols]
+  #   }
+  #   this_dfRnT$RnT <- NULL
+  #   gathercols <- colnames(this_dfRnT)[7:ncol(this_dfRnT)]
+  #   this_dfRnT <- this_dfRnT %>% gather_("Commodity", "Val", gathercols)
+  #   this_dfRnT <- this_dfRnT[, colnames(this_df)]
+  #   
+  # }else{
+  #   this_dfRnT <- NULL
+  # }
+  #---
+  # Create fruit commodity
+  # this_dfFnV <- subset(this_df, Commodity %in% c("F&V", "Vegetables"))
+  # this_df <- subset(this_df, !(Commodity %in% c("F&V", "Vegetables")))
+  # this_dfFnV <- this_dfFnV %>% spread(Commodity, Val)
+  # this_dfFnV$Fruit <- this_dfFnV$`F&V` - this_dfFnV$Vegetables
+  # this_dfFnV$`F&V` <- NULL
+  # this_dfFnV <- this_dfFnV %>% gather(Commodity, Val, Vegetables:Fruit)
+  # this_dfFnV <- this_dfFnV[, colnames(this_df)]
+  #---
+  # # Create "other livestock products" commodity
+  # these_AMTs <- these_commods[grep("AMT", these_commods)]
+  # these_AMTs <- c(these_AMTs, "AllA")
+  # this_dfAMT <- subset(this_df, Commodity %in% these_AMTs)
+  # this_df <- subset(this_df, !(Commodity %in% these_AMTs))
+  # this_dfAMT <- this_dfAMT %>% spread(Commodity, Val)
+  # these_cols <- which(colnames(this_dfAMT) != "AllA")
+  # these_cols <- these_cols[these_cols > 6]
+  # if(length(these_cols) > 1){
+  #   this_dfAMT$`Other animal\nproducts` <- this_dfAMT$AllA - rowSums(this_dfAMT[, these_cols])
+  # }else{
+  #   this_dfAMT$`Other animal\nproducts` <- this_dfAMT$`AllA` - this_dfAMT[, these_cols]
+  # }
+  # this_dfAMT$AMT <- NULL
+  # gathercols <- colnames(this_dfAMT)[7:ncol(this_dfAMT)]
+  # this_dfAMT <- this_dfAMT %>% gather_("Commodity", "Val", gathercols)
+  # this_dfAMT <- this_dfAMT[, colnames(this_df)]
+  #---
+  # Unite new vars with data
+  if("CER" %in% this_commodVec){
+    # list_df <- list(this_df, this_dfKcal, this_dfCER)
+    list_df <- list(this_df, this_dfCER)
+    
+  }else{
+    #list_df <- list(this_df, this_dfKcal)
+  }
+  #this_df <- as.data.frame(do.call(rbind, list_df))
+  #---
+  # Commodity names
+  this_df$commodity <- gsub("^.*\\-", "", this_df$commodity)
+  # Relabel commodities
+  u <- this_df$commodity
+  this_df$commodity[grep("SGR", u)] <- "Sugar"
+  this_df$commodity[grep("AllA", u)] <- "Animal products"
+  #this_df$commodity[grep("CER", u)] <- "Cereals"
+  this_df$commodity[grep("R&T", u)] <- "Roots & tubers"
+  this_df$commodity[grep("OLS", u)] <- "Oilseeds"
+  this_df$commodity[grep("OIL", u)] <- "Vegetable oils"
+  this_df$commodity[grep("PUL", u)] <- "Pulses"
+  this_df$commodity[grep("F&V", u)] <- "Fruits &\nvegetables"
+  this_df$commodity[grep("Lamb", u)] <- "Small\nruminants"
+  #---
+  # Create SSP, RCP, and GCM variables
+  #this_df$SSP <- paste("SSP", i)
+  #this_df$RCP <- NA
+  # this_df$RCP[grep("4.5", this_df$Scenario)] <- "RCP 4.5"
+  # this_df$RCP[grep("8.5", this_df$Scenario)] <- "RCP 8.5"
+  # this_df$RCP[grep("NoCC", this_df$Scenario)] <- "NoCC"
+  # this_df$GCM <- gsub("\\_.*", "", this_df$Scenario)
+  
+  this_df$productiontype <- NULL
+  
+  this_df$scenario[grep("NoWSR", this_df$scenario)] <- "CC No WSR"
+  #this_df$scenario[grep("WSRwrst", this_df$scenario)] <- "CC+WSR (worst case)"
+  this_df$scenario[grep("wrst", this_df$scenario)] <- "CC+WSR (worst case)"
+  this_df$year <- as.integer(this_df$year)
+  this_dfCC <- subset(this_df, scenario == "CC No WSR")
+  this_dfCCWSRwrst <- subset(this_df, scenario == "CC+WSR (worst case)")
+  this_dfCCWSRbest <- subset(this_df, !(scenario %in% c("CC",
+                                                        "CC+WSR (worst case)")))
+  this_dfCCWSRbest$scenario <- "CC+WSR (best case)"
+  # This is throwing a weird warning message. Ignore it.
+  # https://stackoverflow.com/questions/62140483/how-to-interpret-dplyr-message-summarise-regrouping-output-by-x-override
+  this_dfCC <- this_dfCC %>% group_by(region, impactparameter, commodity, year, scenario) %>%
+    summarise(Val = mean(Val, na.rm = T)) %>%
+    as.data.frame
+  this_dfCCWSRbest <- this_dfCCWSRbest %>% group_by(region, impactparameter, commodity, year, scenario) %>%
+    summarise(Val = mean(Val, na.rm = T)) %>%
+    as.data.frame
+  this_dfCCWSRwrst <- this_dfCCWSRwrst %>% group_by(region, impactparameter, commodity, year, scenario) %>%
+    summarise(Val = mean(Val, na.rm = T)) %>%
+    as.data.frame
+  
+  list_df <- list(this_dfCC, this_dfCCWSRbest, this_dfCCWSRwrst)
+  df_out <- as.data.frame(do.call(rbind, list_df))
+  
+  # df_out <- plyr::join_all(list_df, by = c("region",
+  #                                          "impactparameter",
+  #                                          "commodity",
+  #                                          "year"))
+  
+  
+  return(df_out)
+  
+}
+#=============================================================================
+#=============================================================================
+#=============================================================================
+
+
+supplyParams <- c("QSXAgg -- Total Production",
+                  "TAreaXAgg -- Total Area",
+                  "TYldXAgg -- Total Yield",
+                  "AnmlNumXAgg -- Animal Numbers",
+                  "AnmlYldXAgg -- Animal Yield",
+                  "PWXAgg -- World Prices")
+
+demandParams <- c("QHDXAgg -- Household Demand",
+                  "QEXAgg -- Export",
+                  "QLXAgg -- Livestock\nFeed Demand",
+                  "QINTXAgg -- Intermediate Demand",
+                  "QOTHRXAgg -- Other Demand",
+                  "QDXAgg -- Total Demand")
+
+foodAvailParams <- c(#"PerCapKCalCXAgg -- PcKcal by Commodity",
+  "PopulationAtRiskXagg - Pop at Risk of Hunger",
+  "TotalMalnourishedXagg -- Malnurished Children",
+  "QMSHXAgg -- Import Share of Demand")
+
+# supply_params <- c("Area",
+#                    "Production",
+#                    "Yield",
+#                    "Animal Numbers",
+#                    "Animal Yield")
+
+# demand_params <- c("Household Demand",
+#                    "Export",
+#                    "Livestock\nFeed Demand",
+#                    "Intermediate Demand",
+#                    "Other Demand")
+# foodSec_params <- c("Availability\n(kcal/capita/day)",
+#                     "Share at Risk of Hunger",
+#                     "undernourished Children",
+#                     "Import Share of Demand")
+
+paramVec <- c(supplyParams,
+              demandParams,
+              foodAvailParams)
+
+
+commodVec <- c("CER-Wheat",
+               "CER-Maize",
+               "CER-Millet",
+               "CER-Rice",
+               "CER-Barley",
+               "CER-Sorghum",
+               "CER-Other Cereals"
+               #"SGR",
+               #"F&V",
+               #"COT",
+               #"AllA"
+)
+
+commodVec_overView <- c("CER-Wheat",
+                        "CER",
+                        "R&T",
+                        "PUL",
+                        "OLS")
+
+forTotKcalPcap <- c("CER", "OLS", "AllA", "R&T",
+                    "F&V", "PUL", "SGR")
+
+regionVec <- c("SSA", "EUR", "LAC", "NAM", "MEN", "EAP", "SAS", "FSU", "WLD")
+#--------------------------------------------------------------------------
+
+this_folder <- "E:/BSCHIEK/"
+this_subfolder <- "2Blades WSR IMPACT/New run/"
+this_fileName <- "wsr3.csv"
+this_filePath <- paste0(this_folder, this_subfolder, this_fileName)
+df_raw <- read.csv(this_filePath, stringsAsFactors = F)
+#---
+#df_raw$scenario <- gsub("WSR2", "NoWSR", df_raw$scenario)
+#---
+this_commodVec <- unique(c(commodVec, forTotKcalPcap, "-"))
+this_df <- subset(df_raw, impactparameter %in% paramVec &
+                    region %in% regionVec &
+                    commodity %in% this_commodVec)
+df <- process_df(this_df, commodVec, paramVec)
+
+this_commodVec <- unique(c(commodVec_overView, forTotKcalPcap, "-"))
+this_df <- subset(df_raw, impactparameter %in% paramVec &
+                    region %in% regionVec &
+                    commodity %in% this_commodVec)
+df_overView <- process_df(this_df, commodVec_overView, paramVec)
+#rm(df_raw, this_df)
+
+
+paramsList <- list(supplyParams, demandParams, foodAvailParams)
+for(i in 1:length(paramsList)){
+  this_paramVec <- paramsList[[i]]
+  this_paramVec <- gsub("^.*\\-- ", "", this_paramVec)
+  this_paramVec <- gsub("Total ", "", this_paramVec)
+  this_paramVec <- gsub("PopulationAtRiskXagg - ", "", this_paramVec)
+  this_paramVec[grep("PcKcal", this_paramVec)] <- "Availability\n(kcal/capita/day)"
+  this_paramVec <- gsub("Malnurished", "Undernourished", this_paramVec)
+  paramsList[[i]] <- this_paramVec
+}
+supplyParams <- paramsList[[1]]
+demandParams <- paramsList[[2]]
+foodAvailParams <- paramsList[[3]]
+demandParams <- c("HH Demand Rural",
+                  "HH Demand Urban",
+                  "Export",
+                  "Livestock\nFeed Demand",
+                  "Intermediate Demand",
+                  "Other Demand",
+                  "Total Demand")
+
+colnames(df) <- c("Region", "param", "Commodity", "Year", "Scenario", "Val") 
+df <- subset(df, Year != 2005 & Commodity != "CER")
+
+colnames(df_overView) <- c("Region", "param", "Commodity", "Year", "Scenario", "Val") 
+df_overView <- subset(df_overView, Year != 2005)
+
+#==========================================================================
+# Plotting parameters
+title_size <- 9
+subtitle_size <- 8
+legendText_size <- 8
+axisText_size <- 8
+axisTitle_size <- 8
+facetTitle_size <- 8
+cellText_size <- 3
+#==========================================================================
+theseCommods <- c("Pulses", "Wheat", "Other cereals", "Oilseeds", "Roots & tubers")
+
+
+```
+
+#### Acknowledgments
+Special thanks to Mesut Keser and Kumarse Nazari for their valuable input at various stages of the design and execution of this study.
+<!-- # Executive summary -->
+  
+  ```{r, ref.label="mentionSupVars", echo = FALSE}
+```
+
+```{r, ref.label="mentionDemVars", echo = FALSE}
+```
+
+```{r, ref.label="mentionFoodSecVars", echo = FALSE}
+```
+
+# Introduction
+
+Wheat stem rust, a fungal disease once thought to be eradicated by the development of resistant wheat varieties during the Green Revolution, has reemerged as a major threat to global food security. The fungus that causes Wheat Stem Rust, _Puccinia graminis_, spreads primarily by emitting spores that are then carried aloft by winds and deposited in a new area, potentially up to thousands of kilometers---enough to cross oceans. The first new lineage of _P. graminis_ was detected in Uganda in 1999; and several races of this lineage have since spread by aerial transport to much of the rest of the wheat growing world. In such areas, the incidence and severity of Wheat Stem Rust is mitigated only by the research and development of newly resistant wheat varieties, combined with proactive management (spraying of fungicides, in particular). The failure to develop and adequately apply such countermeasures in areas where _P. graminis_ is present has generally resulted in disastrous yield losses.
+
+In order to "right-size" Wheat Stem Rust research, i.e. to provide effective, targeted, timely funding that is proportionate to the threat, it is important to quantify the cost of inaction on this front. Existing assessments of this cost omit the role that market incentives and economic agency play in offsetting and/or aggravating the purely biophysical impacts of the disease. In other words, these assessments effectively imply the "dumb farmer scenario", wherein farmers are assumed to continue stubbornly forward with an unprofitable activity in the face of clear incentives to switch to more lucrative options available to them.
+
+In the real world, the production shortfalls caused by Wheat Stem Rust outbreaks generate price signals that induce farmers in directly affected areas to reallocate land and resources to alternative crops not susceptible to the disease, while also inducing farmers in unaffected areas to reallocate land and resources to wheat for export to the affected areas. In directly affected areas, then, the market mechanism in some measure offsets domestic wheat calorie shortfalls---partly by wheat imports from unaffected areas, and partly by domestic reallocation of cropland and resources to alternative calorie sources. The economic damages to wheat producers in directly affected areas are likewise offset, in some measure, by the elevated price received by wheat producers in unaffected areas. At the same time, however, the reallocation of resources from the domestic to the export market in unaffected areas may, in some measure, precipitate food insecurity far from the occurrence of any outbreak.
+<!-- Simply put, surprising things happen with the spatial distribution of impacts when the economic dimension is taken into account. Godfray et al. find that some of worst damages greatest in ...an area where no rice grown. -->
+  
+  Assessments omitting any treatment of this rather complex dance of price signals and economic agency are thus prone either to understate or to overstate Wheat Stem Rust induced damages, depending on how the precise quantities hiding behind the phrase "in some measure" balance out. Perhaps more importantly, such studies are limited to spatially aggregate statements, with little capacity to comment on how impacts, both direct and indirect, might vary across regions.
+<!-- The question of right-sizing Wheat Stem Rust research funding is as much a question of "where?" as it is a question of "how much"? -->
+  
+  In the present work, we take an integrated assessment modeling approach combining climatic, biophysical, and economic dimensions of analysis to quantify the phrase "in some measure" in a spatially explicit manner. The severity, incidence, and frequency of Wheat Stem Rust yield shocks are introduced into the biophysical modeling based on a survey of 11 international wheat experts. To provide a plausible schedule of where and when future outbreaks occur, we develop a simple interregional disease spread model inspired by the Wheat Stem Rust aerial transport literature. Based on this ensemble, we present best and worst case projections of the economic and food security impacts of Wheat Stem Rust from 2025 to 2050, disaggregated by eight regions: North America, South America, Europe, North Africa & West Asia, Africa South of the Sahara, South Asia, East Asia, and Australia & New Zealand.
+
+To our knowledge, only one other study has taken a comparably integrated approach to pathogen impact assessment. Godfray et al.  [-@godfray2016food] implement a bioeconomic approach to assess the possible economic impacts of a fungal epidemic affecting rice in Southeast Asia for a single year. Methodologically, we go beyond that study by by considering impacts over a multi-year time horizon. Our geographical scope is also necessarily much broader, since modern races of Wheat Stem Rust are now affecting nearly every part of the globe.
+
+[brief summary of results here]
+
+<!-- In general terms, the results suggest that production shortfalls in WSR outbreak regions result in high global wheat prices that stimulate increased wheat production in non-outbreak regions, which is then exported to the outbreak regions. The market mechanism thus offsets the WSR wheat production shortfall to some degree, but fails to completely offset it, ultimately resulting in a global shortfall of several million metric tons in a given outbreak year, relative to the No-WSR baseline. -->
+  
+  <!-- Moreover, there are numerous spillover effects, as wheat area is reallocated to other crops in outbreak regions, and other crop areas are reallocated to wheat in non-outbreak areas, in response to price signals. While this reshuffling of cultivated areas offsets the WSR calorie shortfall in some measure, it is insufficient to completely offset it, ultimately precipitating global production shortfalls in other staple commodity categories, especially other cereals. -->
+  
+  <!-- Because of such spillover effects, the worst affected areas in terms of food security are not necessarily the worst affected in terms of production shortfalls. Most notably, South Asia, a region where the experts surveyed for this study expect no WSR outbreaks, is projected to suffer worst in terms of lower calorie availability, higher population at risk of hunger, and higher numbers of undernourished children. Severe food security impacts are also projected for the East Asia & Pacific and Africa South of the Sahara regions, although the WSR induced production shortfall is projected to be relatively low in these areas. -->
+  
+  <!-- In the present study, we employ a global integrated assessment modeling approach to account for both the biophysical and economic dimensions of Wheat Stem Rust.    multi-market equilibrium model to provide an explicit, dynamic projection of these domestic and international agricultural commodity market interactions in response to a series of Wheat Stem Rust outbreaks over the period 2024-2035. Staple crop yields are explicitly modeled using DSSAT. The model also accounts for assumptions regarding climate change, demographics, and economic growth. This is the first forward looking Wheat Stem Rust assessment, and the first multi-marke     In addition to accounting for market mechanisms, this approach provides a more complete picture of impacts, relative to previous assessments, by accounting for assumptions regarding climate change, demographic trends, and economic growth; has the further advantage of providing a spatial disaggregation of results by geographical region.... and accounts for the  -->
+  <!-- Yield shocks representing Wheat Stem Rust outbreaks are introduced into the model based on a survey of 11 international wheat experts. Experts also provided information  To answer the question of when a particular outbreak happens in a particular place, we develop a network contagion model based on the well known transmission mechanism of _P. graminis_. -->
+  <!-- Scenarios... Also a scenario examining the possibility of outbreaks occuring in all susceptible places at once. -->
+  <!-- The key question is what is the quantity implied "to some degree"? Is it substantial enough to 
+It economic agency of farmers, who may produce...and highly aggregate. existing studies offer no accounting for the ways that market mechanisms may partially offset or aggravate the purely biophysical shock   To our knowledge, no study has yet examined the question in a way that explicitly accounts for agricultural commodity markets and climate change, or disaggregates impacts geographically, or provides a projection of impacts several years into the future. A study by Godfray et al. [-@godfray2016food] 
+<!-- vary widely in method, sophistication, and estimated impacts [@fisher2012emerging; @beddow2013measuring; @pardey2013right; @savary2019global]. Generally speaking, these -->
+  <!-- ## Summary of results -->
+  
+  # Literature review
+  
+  ## Wheat stem rust basic pathology
+  
+  Wheat stem rust or black rust (hereafter "WSR"), caused by the fungus _Puccinia graminis_ Pers. f. sp. _tritici_, posed a serious threat to global wheat production prior to the 1960s (see Roelfs [-@roelfs1992rust] for detailed pathology). The threat subsided thereafter with the development of resistant cultivars during the Green Revolution. However, new races of the WSR causing fungus have emerged that exhibit combined virulence to resistance genes in the most widely grown wheat (_Triticum aestivium_) varieties. The first new race to be detected, designated Ug99, was identified in Uganda in 1999, and quickly spread to the rest of East Africa and Southern Africa, as well as Egypt, Yemen, Turkey, and Iran [@singh2015emergence; @mert2012determination]. More recently, WSR has been detected in Russia [@sibikeev2016likely; @leonova2020detection; @shamanin2020stem], as well as in Europe [@lewis2018potential; @saunders2019tackling; @patpour2022wheat]. Modern WSR races have not yet been detected in East Asia, but infections prior to the green revolution are known to have destroyed several million metric tons of production there [@zhao2023fighting]. Yield loss on severely infected fields has been documented as high as 80% [@huerta2014rusts]. One race, called TKTTF, has caused yield loss of up to 100% on fields in Ethiopia [@singh2015emergence]. It is estimated that 80% of the world's wheat is highly susceptible to these new races [@ayliffe2008durable].
+
+The fungus _Puccinia graminis_ responsible for WSR can travel long distances by emitting spores which are then borne aloft on prevailing winds for up to a week before depositing in a new area [@roelfs1992rust;@nagarajan1990long]. For such aerial journeys to result in infection and spread of the disease, the airborne spores must 1) survive the journey---i.e. remain within a specific range of temperature, humidity, and solar radiation; and 2) deposit in an area where a susceptible variety of wheat is under cultivation, and where environmental conditions are sufficient for spore germination and appressorium formation [@roelfs1992rust; @meyer2017quantifying].
+
+In this way, it is thought that the TKTTF outbreak in Ethiopia, just mentioned above, originally spread from Yemen [@meyer2017large]; and that _P. graminis_ may occasionally cross the Indian Ocean from Southern Africa to Australia [@visser2019microsatellite; @prank2019climate], as well as the North Atlantic Ocean from Europe to North America [@radici2022early]. Prior to the reemergence of WSR as a global threat, Nagarajan and Singh [-@nagarajan1990long] documented numerous aerial transmission pathways of fungi of the genus _Puccinia_ in general, including transatlantic transmission from Africa to South America, and two routes to Europe from North Africa and West Asia.
+<!-- Transmission routes tend to be two-way [@nagarajan1990long; @radici2022early].  -->
+<!-- With climate change, ideal conditions for the WSR causing fungus, as well as other pests and pathogens, appear to be extending to higher latitudes [@bebber2013crop], a trend that could continue into the future, according to future climate projections [@prank2019climate]. -->
+<!-- Xing et al. [@xing2020global]...complex connectivity model. Lagrangian particle dispersion model [@meyer2017quantifying]. -->
+
+## Existing estimates of yield loss due to wheat stem rust
+
+Crude estimates of potential wheat yield loss due to WSR range from disastrous to catastrophic. One study, for example, projects future global WSR induced production losses at \$7.6-\$53.7 billion, annually [@fisher2012emerging; @beddow2013measuring]. The upper bound of this estimate is roughly one third of the current annual value of global wheat production, and close to one fifth of global agricultural GDP. More rigorous estimates are considerably lower, but still alarming. In a counterfactual historical study, Pardey et al. estimate a cumulative global wheat production shortfall of 306 million metric tons over the 48 year period 1961-2009 (or about 6 million metric tons per year) if WSR-resistant varieties had not been developed during the Green Revolution [-@pardey2013right; see also @beddow2013measuring]. Based on a large, international survey of crop experts, Savary et al. [-@savary2019global] estimate a WSR induced 9% wheat yield loss across Africa South of the Sahara, and little impact elsewhere.
+<!-- Donors are unlikely to take such hyperbole seriously [@alston2000meta; @hurley2016returns]. -->
+
+As mentioned in the Introduction, these studies consider only the biophysical WSR yield shock, without then considering how farmers, as rational economic agents, might respond to the shock through management decisions. An example of a different kind of study that explicitly accounts for markets and economic agency is found in Godfray et al.'s impact assessment of a hypothetical fungal disease affecting rice in Southeast Asia for a single year [-@godfray2016food]. The study by Godfray et al. also controls for the effects of climate change and population/economic growth. Such modeling ensembles are sometimes referred to as integrated assessment models (IAMs). Here we take a IAM approach to assess WSR impacts on supply, demand, and food security in wheat and other key agricultural commodity markets. Methodologically, we go beyond the framework implemented by Godfray et al. by considering impacts over a multi-year period, from 2025 to 2050.
+<!-- To address this gap, the present study explicitly models the economic response to the potential global spread of WSR. By accounting for markets, the study accounts for the freedom of farmers to offset agroclimatic adversity by investing more land and inputs in production, or by switching to alternative crops. Such decisions, made in response to price signals, may be profitable and succeed in offsetting agroclimatic adversity at the farm level to some degree, but may also result in aggregate production shortfalls at the country or region scale. They may also incur spillover effects in other commodity markets, as land and resources are drawn away from the production of those commodities in order to confront the WSR threat. -->
+  
+  ## The Russia-Ukraine war
+  
+  Both Russia and Ukraine are price makers in the global wheat market, together accounting for about a quarter of world wheat exports in 2021 [@pseData]. It stands to reason, then, that the Russian war on Ukraine since February of 2022 may wreak havoc on cereal markets, and hence food systems. Early assessments of the war's impact on the cereal trade are based on the assumption that both Ukrainian and Russian Black Sea ports "are unusable right now" [@mottaleb2022potential], and paint a commensurately dire outlook for global food security.
+
+However, the Black Sea Grain Initiative (BSGI), signed in July of 2022 and renewed in March 2023, has restored the flow of Black Sea grain exports to well above the cataclysmic levels assumed in the early assessments. Whereas Mottaleb et al. [-@mottaleb2022potential] suggest a 50% reduction in Ukrainian wheat exports below the 2021 level, the USDA projects a 31% decrease (and a 24% decrease in Ukrainian corn exports) in its January 2023 Wheat Outlook [-@usdaWheat01]; and has further revised this downward to 21% and 6%, respectively, in its April Outlook [@pseData]. In addition to the BSGI, high global stocks, together with high planted areas in the U.S. and a bumper crop in Russia, among other factors, have, for the time being, returned global wheat prices to pre-war levels [@usdaWheat03].
+
+In the present effort, we attempted to run modeling scenarios accounting for both WSR and the potential war induced shocks suggested in the USDA January 2023 Wheat Outlook. This resulted   in market disequilibria, which equilibrium models like the one used here are not designed to handle; and so we cannot report on such scenarios within the scope of the present study. Nonetheless, this result is instructive in and of itself, as it suggests that the war in Ukraine, combined with global WSR outbreaks, could throw the global supply and demand of wheat, and perhaps of other key staple commodities, into disequilibrium.
+
+# Method
+
+## The IMPACT model
+
+In order to model the dynamic interplay of climatic, biophysical, and economic forces, we use the International Model for Policy Analysis of Agricultural Commodities and Trade (IMPACT), developed and maintained at the International Food Policy Research Institute [@robinson2015international]. Briefly, IMPACT is comprised of a climate module, a biophysical crop modeling module, and a global multimarket equilibrium module, which altogether cover 62 agricultural commodity markets in 159 countries. Assumptions regarding future population growth, economic growth, and the pace of climate change enter the model as exogenous trends. A more detailed description of IMPACT is given in the Appendix.
+
+Yield shocks are introduced in the biophysical wheat model to represent WSR outbreaks. The location, severity, and frequency of outbreaks is based on a survey of eleven international wheat experts contacted for this study. The consultation was conducted by means of a questionnaire sent to experts within the Alliance of Bioversity and CIAT's extended network of partners over the period April-September of 2021. Respondents specifically covered Canada, Uruguay, Paraguay, Ethiopia, South Africa, and the Central/West Asia and North Africa region. Responses were then synthesized and extrapolated to geographical areas not specifically covered by the survey with help from David Hodson, Director of the Global Wheat Rust Monitoring System.
+<!-- The results of the consultation, which ultimately covered 65 countries, is summarized in Table 1. -->
+  
+The outbreak frequencies gathered from the expert consultation are necessary but insufficient to determine the spatial distribution of outbreaks at a given time. The airborne spore transport studies cited in the previous section suggest that outbreaks in one area are correlated with outbreaks in neighboring areas. Based on these findings, we develop a simple network model to determine a plausible spatial distribution of outbreaks over time. The model calculates outbreak vulnerability in each of the eight focal regions at a given time as a function both of the region's own intrinsic vulnerability and of outbreak vulnerability in neighboring regions. Intrinsic vulnerability is parameterized on the basis of the outbreak frequencies elicited from experts, while the influence of vulnerability in neighboring regions is parameterized on the basis of the cited airborne transport literature. A detailed presentation of this model is given in the Appendix.
+<!-- In order to model this complex, dynamic, global interplay of agroclimatic and economic forces, the International Model for Policy Analysis of Agricultural Commodities and Trade (IMPACT) is used. IMPACT, , is not a single model, but rather a suite of models organized into three modules: a crop modeling module, a climate change module, and a multimarket equilibrium module covering more than 60 agricultural commodities. Yield is thus modeled as a function of both agroclimatic and economic factors. This means that exogenous impacts on biophysical factors (as a result of climate change or disease outbreak, for example) can be offset by the farmer's ability to adapt to the biophysical stress of climate change by altering input levels or switching to alternative crops, in response to price signals. Future exogenous yield gains due to ongoing improvements in germplasm and farm management are also taken into account. -->
+  <!-- IMPACT also allows for the introduction of user-defined exogenous yield shocks. Godfray et al. [-@godfray2016food], for example, introduced yield shocks in IMPACT to simulate rice fungal disease epidemics in Southeast Asia. In the present study, exogenous wheat yield shocks are introduced at 3-10 year intervals, depending on country, to simulate global WSR outbreaks. The magnitude, location, and frequency of these shocks are based on consultations with 11 international wheat experts who were contacted for this study. The multimarket equilibrium module inside of IMPACT generates new price signals in response to supply-demand imbalances resulting from these exogenous shocks, whereby farmers adjust planting and management decisions such that a new equilibrium is reached. -->
+  <!-- Some of the experts consulted expect no WSR outbreaks in their geographic area of expertise due to the adoption of newly available WSR-resistant varieties and/or increased fungicide use. However, it stands to reason that, even in these cases, some indirect yield loss may result from higher fungicide costs. (Economic yields are a function not only of agroclimatic factors but also prices.) To model indirect yield loss due to higher input costs, an additional exogenous yield shock is introduced based on the expected WSR-induced fungicide cost increase, and on IMPACT's input elasticities of wheat yield for each country. The expected fungicide cost increase for a given country is extrapolated from FAO fungicide use data for that country. -->
+
+Using this integrated modeling approach, the potential global economic impacts of WSR are modeled from 2025 to 2050. A "no wheat stem rust" counterfactual scenario (No-WSR) is also modeled as a baseline for comparison. The future impacts of WSR on supply, demand, and food security indicators are presented and discussed below in terms of the difference between the WSR and No-WSR magnitudes.
+<!-- Both the WSR and No-WSR scenarios take account of climate change, as well as assumptions regarding future GDP growth, technological advances, and demographic trends (the "Shared Socioeconomic Pathway").  -->
+<!-- (Figure ). -->
+<!-- Impacts in percentage terms are included in the Appendix. -->
+<!-- # ```{r, fig.show='hold', fig.width=6, fig.height=5, fig.align='center', ft.align = "center", fig.cap="\\label{fig:graphicalAid}How to interpret IMPACT output.", echo=FALSE} -->
+<!-- knitr::include_graphics("interpreting_impact.png") -->
+<!-- ``` -->
+<!-- ## IMPACT analysis -->
+<!-- In IMPACT, the direct WSR yield shocks elicited from experts were introduced on both rainfed and irrigated fields at 3-10 year intervals, starting in 2024. IMPACT computed the resulting supply-demand perturbations across more than 65 commodity markets and 148 countries, out to 2050. Impacts in any given outbreak year are about the same, and return roughly to the No-WSR baseline in non-outbreak years. The impact analysis given below thus focuses on a single outbreak year. Results can be extrapolated to any time horizon by simply multiplying the single year value by the number of expected outbreaks within the given time horizon of interest. -->
+
+<!-- ## Expert consultation to determine direct yield loss due to wheat stem rust -->
+<!-- The potential spread, severity, and frequency of future WSR outbreaks was assessed based on consultations with 11 international wheat experts.  -->
+<!-- Generally speaking, the consultation indicates especially high WSR risk in East Africa, moderate risk in South America, Iraq, Uzbekistan, Tajikistan, Russia and the Mediterranean Basin (excluding Western Europe and Turkiye), and relatively low risk for Afghanistan, Turkmenistan, Kyrgyzstan, Iran, Southern Africa, Kazakhstan, Canada, Australia, USA, Western Europe, Ukraine, South Asia, and China. -->
+<!-- WSR is expected to occur with high frequency (every 1-5 years) in most of these areas, but the expected spread and severity of these occurrences depends critically on management. Major outbreaks are expected to occur less frequently in the relatively low risk countries due to spraying of fungicides and planting of resistant varieties.... High and moderate risk: 3 years. Low risk: 5-10 years -->
+<!-- ...lower risk areas are lower risk due to proactive management (varieties and spraying)... -->
+<!-- ...The best case thus represents the status quo level of wheat stem rust research, while the worst case represents a defunding of WSR research. -->
+<!-- For the purposes of modeling, the country level yield loss in the high risk WSR areas is 10-20%, in moderate: 5-10, in low: 0-5.  -->
+<!-- The first draft of the questionnaire was written by the author of the present report. Before being sent out to wheat experts, the questionnaire was reviewed and substantially modified by Dave Hodson, a Senior Scientist at CIMMYT and long time coordinator of the Global Wheat Rust Monitoring System. Wheat experts from around the world returned their completed questionnaires over the period April to September of 2021. Once the responses were in, Dave Hodson again participated in their interpretation and synthesis for introduction into the IMPACT model. This included some extrapolations to cover important wheat growing countries not explicitly mentioned in the responses. -->
+<!-- The results of this consultation, which ultimately covered 65 countries, are summarized in Table 1. In the present study, these responses are interpreted as the "best case scenario" of WSR spread and severity. A "worst case scenario" is also modeled wherein the expert estimates of WSR direct yield loss are doubled, or raised to 5-10% in cases where experts expect 0% yield loss (Table 2). -->
+<!-- The 11 expert responses are available in the supplemental materials folder accompanying this study. -->
+
+[Table 1]
+
+## Dynamic modeling of the spatial distribution of outbreaks
+
+Global, dynamic assessment of WSR impacts requires careful thought about when and where outbreaks occur. The experts consulted for this study indicated the likely outbreak frequency for a given country or region, but the spatial distribution of outbreaks at a given time remains to be determined. The spatial distribution of outbreaks at a given time is important because, as mentioned in the introduction, international market mechanisms can, to some extent, offset the food security impacts of outbreaks occurring in some regions but not in others. And, by the same token, this mitigating mechanism is rendered less effective as the number of regions where outbreaks occur at a given time increases. A scenario in which outbreaks occur everywhere at the same time may largely nullify the effectiveness of any offsetting market mechanisms.
+
+The null hypothesis---that the spatial distribution of outbreaks at any given time is random---may be rejected on the basis of the airborne spore dispersal studies cited in the literature review, which demonstrate a clear spatial correlation between outbreak regions with high connectivity. In other words, the frequency of outbreaks in a given region is influenced by the frequency of outbreaks in surrounding regions.
+
+To model the spatial distribution of outbreaks over time, we introduce an index $x_i(t)$ representing the $i^{th}$ region's wheat area vulnerable to WSR at time $t$, and consider the relation between $x_i(t)$ and the rate of vulnerability $d x_i / dt$ over time. We reason that the rate of vulnerability must slow as vulnerability increases, since increasing vulnerability calls forth the conditions that ultimately arrest and reverse the rate of vulnerability---for e.g., a dwindling host plant population (due to extermination via infection or to farms switching to alternative crops to avoid infection), and/or NAR plant pathologist response together with increased farm level awareness and protective countermeasures (spraying, planting of resistant varieties). Mathematically, this reasoning can be expressed
+
+\begin{equation}
+\frac{d^2 x_i}{dt^2} = - k_{ii} x_i(t)
+\end{equation}
+
+That is to say, in words, the slowing of the rate of vulnerability is proportionate to the level of vulnerability. Dimensional analysis reveals that the proportionality constant $k_{ii}$ has units of $\text{time}^{-2}$, and may be interpreted as a normalized measure of how quickly vulnerability translates into an outbreak within region $i$---and thus a measure of how quickly the conditions for arrest and reversal of vulnerability are reached.
+<!-- The higher the value of $k_{ii}$, the lower the threshold at which vulnerable area becomes infected area with yield loss. -->
+  
+  As documented in the spore dispersal studies, the vulnerability in neighboring regions must also be taken into account. We model the influence of vulnerability in a neighboring region $j \neq i$ on region $i$'s rate of vulnerability by adding the difference $x_j(t) - x_i(t)$ times $-k_{ij}$, where $k_{ij}$ is a constant quantifying the ease of airborne spore transmission between the two regions.
+
+\begin{equation}
+\frac{d^2 x_i}{dt^2} = - (k_{ii} x_i(t) + \sum_{j \neq i} k_{ij} (x_j(t) - x_i(t)))
+\label{eq:assump}
+\end{equation}
+
+Regions $i$ and $j$ are defined as neighbors if $k_{ij} \neq 0$. The modified equation says that if neighboring region $j$'s vulnerability is greater than region $i$'s vulnerability ($x_j(t) > x_i(t)$), then region $j$'s vulnerability aggravates region $i$'s vulnerability, which adds an additional brake on its rate of vulnerability. Conversely, if $x_j(t) < x_i(t)$, then neighboring region $j$'s vulnerability alleviates region $i$'s vulnerability, thereby offsetting the brake on $dx_i/dt$. In matrix form, 
+
+\begin{equation}
+\frac{d^2 \mathbf{x}}{dt^2} + K \mathbf{x}(t) = \mathbf{0}
+\label{eq:hOsc0}
+\end{equation}
+
+Where the off-diagonal elements of $K$ are $k_{ij}$, the diagonal elements are $\sum_j k_{ij}$, and $\mathbf{0}$ is a vector of zeros. Now, note that the vector $\mathbf{x}(t)$ may be expressed as a linear combination of orthonormal basis vectors,
+
+\begin{equation}
+\mathbf{x}(t) = U \mathbf{c(t)}
+\label{eq:xtOrth}
+\end{equation}
+
+Such that the previous equation can be rewritten
+
+\begin{equation}
+U \frac{d^2 \mathbf{c}}{dt^2} + K U \mathbf{c}(t) = \mathbf{0}
+\end{equation}
+
+And the coordinates $\mathbf{c}$ can then be found by premultiplying through by the transpose of $U$.
+
+\begin{equation}
+\begin{split}
+U' U \frac{d^2 \mathbf{c}}{dt^2} + U' K U \mathbf{c}(t) &= \mathbf{0} \\
+\frac{d^2 \mathbf{c}}{dt^2} + U' K U \mathbf{c}(t) &= \mathbf{0}
+\end{split}
+\end{equation}
+
+The basis $U$ may be any set of orthonormal vectors. To solve for $\mathbf{c}(t)$, it is expedient to focus on the case where $U$ equals the normalized eigenvectors of $K$, such that this equation further reduces to
+
+\begin{equation}
+\frac{d^2 \mathbf{c}}{dt^2} + \Lambda \mathbf{c}(t) = \mathbf{0}
+\end{equation}
+
+Where $\Lambda$ is the diagonal matrix of eigenvalues of $K$. This is well known in physics and engineering contexts as the harmonic oscillator equation, with unique solution
+
+\begin{equation}
+c_i(t) = c_i(0) \cos(\omega_i t) + \frac{1}{\omega_i} \frac{d c_i}{dt} \Bigr|_{t = 0} \sin(\omega_i t)
+\label{eq:hOsc1}
+\end{equation}
+
+Where the frequencies $\omega_i$ equal the square root of the eigenvalues of $K$ (denoted $\lambda_i$).
+
+\begin{equation}
+\omega_i = \sqrt{\lambda_i}
+\end{equation}
+
+See Meirovitch [-@meirovitch2001fundVibs] for details. The correspondence between $\omega_i$ and $\lambda_i$ is perhaps easier to discern if Equation \ref{eq:hOsc1} is substituted into Equation \ref{eq:hOsc0}, giving
+
+\begin{equation}
+\begin{split}
+-\Omega^2 U \mathbf{c}(t) + K U \mathbf{c}(t) &= \mathbf{0} \\
+\Rightarrow \: (K - \Omega^2) U \mathbf{c}(t) &= \mathbf{0}
+\end{split}
+\end{equation}
+
+(Where $\Omega$ is the diagonal matrix of frequencies $\omega_i$ and $\mathbf{0}$ is a vector of zeros.)
+
+The spatial distribution of regional vulnerabilities at any given time ($\mathbf{x}(t)$) may thus be calculated by substituting Equation \ref{eq:hOsc1} into Equation \ref{eq:xtOrth}. Note that, given the functional form derived in Equation \ref{eq:hOsc1}, the $x_i(t)$ periodically take negative values. Negative WSR vulnerability may be interpreted as WSR resistance.
+<!-- and is subject to the same assumption formalized in Equation \ref{eq:assump}. -->
+  
+  For present purpose of modeling a plausible spatial distribution of outbreaks over time, the precise value of a given $x_i(t)$ is unimportant. We assume an outbreak occurs in a given region when $x_i(t)$ reaches a maximum. The regional spore transmission network is displayed in Figure \ref{fig:RegNet}, together with the transmission coefficient values and supporting literature. The own transmission coefficients ($k_{ii}$) are assigned values such that the anticipated outbreak frequencies in Table 1 are preserved.
+
+Assigning values for the transmission coefficients between regions (the $k_{ij}$ where $i \neq j$) is a considerably less straightforward task. We aim for order of magnitude accuracy based on qualitative assessments gathered from the literature. At a more disaggregate level, the work by Radici et al. [-@radici2022early] classifies transmission routes as "common", "occasional", and "rare" in the northern hemisphere. Taking this as a rough guide, we assign values of 0.01 and 0.001, corresponding to "occasional" and "rare", respectively (no instances of "common" occur at the more aggregate network considered here). The transmission route connecting Africa South of the Sahara with West Asia & North Africa is assigned a value of 0.01 based on the assessment by Meyer et al. [-@meyer2017quantifying]. In the southern hemisphere, the literature generally characterizes successful transoceanic spore transport as infrequent [@nagarajan1990long; @visser2019microsatellite; @prank2019climate]; and so we assign 0.001 to these routes.
+
+```{r, fig.show='hold', fig.width=6, fig.height=5, fig.align='center', ft.align = "center", fig.cap="\\label{fig:RegNet}Outbreak network.", echo=FALSE}
+
+knitr::include_graphics("spore pathways 800x600.png")
+
+```
+South Asia is excluded from the spore transmission network based on the expert consultation summarized in the previous section, which indicates high confidence in the region's resilience to WSR outbreaks for the foreseeable future. We note that this assessment is corroborated by Meyer et al. [-@meyer2017quantifying], who find "rare to infrequent" direct spore transmission from West Asia (Iran) to South Asia, as well as "infrequent" direct transmission from Eastern Yemen across the Arabian Sea, and "frequent to very frequent" indirect transmission via Central Asia (Afghanistan)---but with a very small infection time window due to differences in cropping seasons.
+
+Finally,...initial values $\mathbf{c}(0)$ and $d \mathbf{c}(0) / dt$...
+
+Based on this parameterization of $K$, the region WSR vulnerabilities are calculated over a 25 year time horizon corresponding to the years 2025 to 2050, and presented in Figure \ref{fig:spatDist}.
+
+```{r, fig.show='hold', fig.width=5, fig.height=4, fig.align='center', ft.align = "center", fig.cap="\\label{fig:spatDist}.", echo=FALSE}
+
+# Own
+kSSA <- 1 # * mSSA
+kSAm <- 0.1 # * mSAm
+kAUS <- 0.01 # * mAUS
+kWANA <- 0.1 # * mWANA
+kRCA <- 0.01 # * mRCA
+kEUR <- 0.01 # * mEUR
+kNAM <- 0.01 # * mNAM
+kEA <- 0.01 # * mEA
+# Cross
+kSSAsam <- 0.001 # * sqrt(mSSA * mSAm)
+kSSAaus <- 0.001 # * sqrt(mSSA * mAUS)
+kSSAwana <- 0.01 # * sqrt(mSSA * mWANA)
+kWANArca <- 0.01 # * sqrt(mWANA * mRCA)
+kWANAeur <- 0.01 # * sqrt(mWANA * mEUR)
+kRCAeur <- 0.01 # * sqrt(mRCA * mEUR)
+kRCAea <- 0.01 # * sqrt(mRCA * mEA)
+kEURnam <- 0.001 # * sqrt(mEUR * mNAM)
+# Put own and cross influence into rows for each region
+Krow1_ssa <- c(kSSA, kSSAsam, kSSAaus, kSSAwana, 0, 0, 0, 0)
+Krow2_sam <- c(kSSAsam, kSAm, 0, 0, 0, 0, 0, 0)
+Krow3_aus <- c(kSSAaus, 0, kAUS, 0, 0, 0, 0, 0)
+Krow4_wan <- c(kSSAwana, 0, 0, kWANA, kWANArca, kWANAeur, 0, 0)
+Krow5_rca <- c(0, 0, 0, kWANArca, kRCA, kRCAeur, kRCAea, 0)
+Krow6_eur <- c(0, 0, 0, kWANAeur, kRCAeur, kEUR, 0, kEURnam)
+Krow7_eas <- c(0, 0, 0, 0, kRCAea, 0, kEA, 0)
+Krow8_nam <- c(0, 0, 0, 0, 0, kEURnam, 0, kNAM)
+listRows <- list(Krow1_ssa, Krow2_sam, Krow3_aus, Krow4_wan,
+                 Krow5_rca, Krow6_eur, Krow7_eas, Krow8_nam)
+K <- do.call(rbind, listRows)
+Kmod <- K
+diag(Kmod) <- rowSums(K)
+#M <- diag(rep(1, n))
+regOrder <- c("Africa South\nof the Sahara", "South America", "Australia", "West Asia &\nNorth Africa", "Russia &\nCentral Asia", "Europe", "East Asia", "North America")
+#eigOut <- eigen(solve(M) %*% Kmod)
+#eigOut <- eigen(Gmod)
+eigOut <- eigen(Kmod)
+eigVals <- eigOut$values
+eigVecs <- eigOut$vectors
+resFreqs <- sqrt(eigVals)
+#----------------------------------------------------------------
+# Note eigVecs are not orthogonal but are Kmod and M orthogonal
+# t(eigVecs) %*% Kmod %*% eigVecs
+# t(eigVecs) %*% M %*% eigVecs
+#---------------------------------------------------------------
+U <- eigVecs
+#------------------
+# # Initial values
+# dLnfdt0 <- 1/2
+# f0 <- 1/2
+# #------------------
+# Derive max amplitude and phase shift parameters based on initial values
+# Cvec <- f0 * sqrt(1 + 1 / resFreqs^2 * dLnfdt0^2)
+# phiVec <- -atan(-1 / resFreqs * dLnfdt0)
+n <- length(resFreqs)
+# c0 <- t(U) %*% rnorm(n)
+# cDot0 <- t(U) %*% rnorm(n)
+c0 <- c(1.6574469, -0.6223231, 0.4870719, -0.6398373, -0.4606594, 0.4334534, -0.7370816, -0.5185418)
+# cDot0 <- rep(0, n)
+cDot0 <- c(-0.18966722, 0.93685226, 1.47569166, -1.17947652, 0.85290798, 1.05887843, 0.06238909, -0.19244532)
+#------------------
+lenT <- 300
+th <- 25 #time horizon in years, 1 year = 2 pi
+tVec <- seq(0, th * 2 * pi, length.out = lenT)
+list_qVec <- list()
+for(t in 1:lenT){
+  #fVec <- Cvec * cos(resFreqs * tVec[t] - phiVec)
+  fVec <- c0 * cos(resFreqs * tVec[t]) + cDot0 * sin(resFreqs * tVec[t])
+  qVec <- U %*% fVec
+  list_qVec[[t]] <- t(qVec)
+}
+
+df <- as.data.frame(do.call(rbind, list_qVec))
+#colnames(df) <- c("EAfr", "CWANA", "EUR", "NAM")
+#regionVec <- c("SSA", "WANA", "EUR", "RCA", "NAM", "EAP")
+colnames(df) <- regOrder
+gatherCols <- colnames(df)
+# spec <- spec.ar(df$SSA)
+# periodEAfr <- 1 / spec$freq[which.max(spec$spec)]
+# matPeaks <- pracma::findpeaks(df$SSA)
+# indLows <- matPeaks[, 4]
+# #mean(diff(indLows))
+# tPerVec <- tVec[indLows[-1]] - tVec[indLows[-length(indLows)]]
+# tPerVec <- tPerVec[-length(tPerVec)]
+# fctr <- max(tPerVec)
+# yrVec <- tVec * fctr / pi
+yrVec <- tVec / (2 * pi)
+
+df$Year <- 2025 + yrVec
+df <- df %>% gather_("Region", "Vulnerability", gatherCols)
+# gg <- ggplot(df, aes(x = Year, y = `Outbreak amplitude`, group = Region, color = Region))
+# #gg <- gg + geom_hline(yintercept = 0)
+# gg <- gg + geom_vline(xintercept = 0)
+# gg <- gg + geom_line()
+# gg <- gg + coord_cartesian(xlim = c(2024, 2050))
+# gg <- gg + theme_bw()
+# gg <- gg + theme(legend.position = "top",
+#                  axis.text.y = element_blank(),
+#                  axis.ticks.y = element_blank())
+# gg
+
+#df$Year <- as.Date(as.character(df$Year), "%Y")
+gg <- ggplot(df, aes(x = Year, y = Vulnerability))
+gg <- gg + geom_line()
+#gg <- gg + geom_hline(yintercept = 0)
+#gg <- gg + scale_x_continuous(breaks = 5)
+# gg <- gg + scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+# gg <- gg + scale_x_date(breaks = scales::breaks_pretty(n = 8), labels = scales::date_format("%Y"))
+gg <- gg + facet_wrap(~Region)
+gg <- gg + coord_cartesian(xlim = c(2024, 2050))
+gg <- gg + theme_bw()
+gg <- gg + theme(axis.text.y = element_blank(),
+                 axis.ticks.y = element_blank())
+gg
+
+
+```
+
+
+
+
+<!-- freq-amplitude graph...directions to expand/complicate the model: damping effect...possibility of anti-resonance... -->
+<!-- Based on the expert information gathered, ...tables -->
+
+
+
+
+# Results
+
+## Supply side impacts
+
+Global wheat production in a typical outbreak year is projected to fall below the No-WSR baseline level of production by `r prodWLDwhea2033B/1000`-`r prodWLDwhea2033W/1000` million metric tons (Figure \ref{fig:supGraphicMag}). The difference between WSR and No-WSR wheat production levels is especially sharp in the Former USSR regions (`r prodFSUwhea2033B/1000`-`r prodFSUwhea2033W/1000` million metric tons), Latin America & Caribbean (`r prodLACwhea2033B/1000`-`r prodLACwhea2033W/1000`), and West Asia & North African regions (`r prodWANAwhea2033B/1000`-`r prodWANAwhea2033W/1000` million metric tons).
+
+The WSR production shortfall is due to projected reductions in both wheat yield and area in the outbreak areas, relative to the No-WSR baseline. The projected yield loss is most pronounced in the Latin America & Caribbean (`r ydLACwhea2033B`-`r ydLACwhea2033W` kg./ha.), Africa South of the Sahara (`r ydSSAwhea2033B`-`r ydSSAwhea2033W` kg./ha.), and Former USSR (`r ydFSUwhea2033B`-`r ydFSUwhea2033W` kg./ha.) regions. Elsewhere, a slight increase in wheat yield is projected, as farms in non-outbreak areas invest more in wheat production in response to the high export price.
+
+The projected reduction in wheat area relative to the No-WSR baseline is likewise concentrated in the major outbreak areas, where wheat farmers are forced to switch to other crops, especially other cereals. The resulting reduction in wheat area is especially pronounced in the Latin America & Caribbean (`r areaLACwhea2033B`-`r areaLACwhea2033W` thousand hectares) and Former USSR (`r areaFSUwhea2033B`-`r areaFSUwhea2033W` thousand hectares) regions.
+
+Globally, a net increase of `r areaWLDwhea2033B`-`r areaWLDwhea2033W` thousand hectares allocated to wheat cultivation is projected relative to the No-WSR baseline, as farmland in non-outbreak regions is reallocated from other crops to wheat in response to the high wheat export price. Projected wheat area increases are most pronounced in South Asia (`r areaSASwhea2033B`-`r areaSASwhea2033W` thousand hectares), North America (`r areaNAMwhea2033B`-`r areaNAMwhea2033W` thousand hectares), and the East Asia & Pacific regions (`r areaEAPwhea2033B`-`r areaEAPwhea2033W` thousand hectares). However, these increases in wheat area come at the cost of a substantial projected decline in area allocated to other cereals in these regions (`r areaSASocer2033B`-`r areaSASocer2033W`, `r areaNAMocer2033B`-`r areaNAMocer2033W`, and `r areaEAPocer2033B`-`r areaEAPocer2033W`, respectively), relative to the No-WSR baseline.
+
+On balance, then, these results suggest that the WSR-induced decline in wheat productivity in outbreak regions may generate price signals in non-outbreak regions that divert substantial resources away from the cultivation of other cereals, only to 1) fail to completely offset the WSR-induced wheat production shortfall in outbreak regions, while 2) precipitating an additional shortfall in the production of other cereals in non-outbreak areas.
+
+```{r, fig.show='hold', fig.width=7, fig.height=8, fig.align='center', ft.align = "center", fig.cap="\\label{fig:supGraphicMag}...", echo=FALSE}
+
+df_sup <- subset(df_overView, param %in% supplyParams &
+                   Commodity %in% theseCommods)
+df_sup <- df_sup %>% spread(Scenario, Val)
+df_sup$`Best case` <- df_sup$`CC+WSR (best case)` - df_sup$`CC No WSR`
+df_sup$`Worst case` <- df_sup$`CC+WSR (worst case)` - df_sup$`CC No WSR`
+df_sup$`CC No WSR` <- NULL
+df_sup$`CC+WSR (best case)` <- NULL
+df_sup$`CC+WSR (worst case)` <- NULL
+df_sup <- df_sup %>% gather(Scenario, `WSR-No WSR (Difference)`, `Best case`:`Worst case`)
+df_sup$`WSR-No WSR (Difference)`[grep("Yield", df_sup$param)] <- 1000 * df_sup$`WSR-No WSR (Difference)`[grep("Yield", df_sup$param)]
+df_sup$`WSR-No WSR (Difference)` <- round(df_sup$`WSR-No WSR (Difference)`, 0)
+#----------------------------------------------------------------
+#df_plot <- subset(df_sup, Year %in% c(2035))
+df_plot <- subset(df_sup, Year >= 2020)
+df_plot$`WSR-No WSR (Difference)` <- round(df_plot$`WSR-No WSR (Difference)`, 0)
+df_plot$param[grep("Yield", df_plot$param)] <- "Yield (kg./ha.)"
+df_plot$param[grep("Production", df_plot$param)] <- "Production (1000 metric tons)"
+df_plot$param[grep("Area", df_plot$param)] <- "Area (1000 hectares)"
+#----------------------------------------------------------------
+# thisTitle <- "Wheat stem rust impact on yield, area harvested, and production, by region\n(Expressed as difference in magnitude, WSR - No WSR)"
+# 
+# df_tab <- subset(df_plot, Year %in% seq(2033, 2050, 5) &
+#                    Scenario == "Best case")
+# 
+#   gg <- ggplot(df_tab, aes(x = Year,
+#                             y = Commodity,
+#                             fill = `WSR-No WSR (Difference)`,
+#                             label = `WSR-No WSR (Difference)`))
+#   gg <- gg + geom_tile()
+#   gg <- gg + geom_text(size = cellText_size)
+#   gg <- gg + facet_grid(Region~param)
+#   gg <- gg + scale_fill_gradient2(low = "magenta",
+#                                   mid = "white",
+#                                   high = "cyan",
+#                                   midpoint = 0)
+#   gg <- gg + labs(title = thisTitle)
+#   gg <- gg + theme_bw()
+#   gg <- gg + theme(strip.background = element_rect(fill = "white"),
+#                    strip.text = element_text(size = facetTitle_size),
+#                    axis.title = element_blank(),
+#                    axis.text.y = element_text(size = axisText_size),
+#                    axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
+#                    legend.position = "none",
+#                    plot.title = element_text(size = title_size))
+# ggTabBest <- gg
+# #---
+# df_tab <- subset(df_plot, Year %in% seq(2033, 2050, 5) &
+#                    Scenario == "Worst case")
+# 
+#   gg <- ggplot(df_tab, aes(x = Year,
+#                             y = Commodity,
+#                             fill = `WSR-No WSR (Difference)`,
+#                             label = `WSR-No WSR (Difference)`))
+#   gg <- gg + geom_tile()
+#   gg <- gg + geom_text(size = cellText_size)
+#   gg <- gg + facet_grid(Region~param)
+#   gg <- gg + scale_fill_gradient2(low = "magenta",
+#                                   mid = "white",
+#                                   high = "cyan",
+#                                   midpoint = 0)
+#   gg <- gg + labs(title = thisTitle)
+#   gg <- gg + theme_bw()
+#   gg <- gg + theme(strip.background = element_rect(fill = "white"),
+#                    strip.text = element_text(size = facetTitle_size),
+#                    axis.title = element_blank(),
+#                    axis.text.y = element_text(size = axisText_size),
+#                    axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
+#                    legend.position = "none",
+#                    plot.title = element_text(size = title_size))
+# ggTabWorst <- gg
+
+#----------------------------------------------------------------
+thisTitle <- "Projected wheat stem rust impact on yield, area harvested, and production in an outbreak year, by region\n(Expressed as difference in magnitude, WSR - No WSR)"
+#2024, 2027, 2033, 2033, 2036, 2039, 2042, 2045, 2048
+df_tab <- subset(df_plot, Year == 2025)
+thisParamVec <- unique(df_tab$param)
+list_gg <- list()
+for(i in 1:length(thisParamVec)){
+  thisParam <- thisParamVec[i]
+  this_dfPlot <- subset(df_tab, param == thisParam)
+#  this_dfPlot <- subset(df_plot, param == thisParam)
+  this_dfPlotTot <- subset(this_dfPlot, Region == "World")
+  this_dfPlot <- subset(this_dfPlot, Region != "World")
+
+  # this_dfPlotBest <- subset(this_dfPlot, Scenario == "Best case")
+  # gg <- ggplot(this_dfPlotBest, aes(x = Year,
+  #                          y = `WSR-No WSR (Difference)`,
+  #                          group = Commodity,
+  #                          color = Commodity))
+  # gg <- gg + geom_line()
+  # gg <- gg + facet_wrap(~Region, scales = "free_y")
+  
+
+  gg <- ggplot(this_dfPlot, aes(x = Commodity,
+                             y = Region,
+                             fill = `WSR-No WSR (Difference)`,
+                             label = `WSR-No WSR (Difference)`))
+  gg <- gg + geom_tile()
+  gg <- gg + geom_text(size = cellText_size)
+  gg <- gg + scale_fill_gradient2(low = "magenta",
+                                mid = "white",
+                                high = "cyan",
+                                midpoint = 0)
+gg <- gg + facet_wrap(~Scenario, ncol = 1)
+gg <- gg + labs(title = thisParam)
+gg <- gg + theme_bw()
+gg <- gg + theme(strip.background = element_rect(fill = "white"),
+                 strip.text = element_text(size = facetTitle_size),
+                 axis.title = element_blank(),
+                 axis.text.y = element_text(size = axisText_size),
+                 #axis.text.x = element_text(size = axisText_size),
+                 axis.text.x = element_blank(),
+                 legend.position = "top",
+                 legend.text = element_text(size = legendText_size),
+                 legend.title = element_text(size = legendText_size),
+                 plot.title = element_text(size = title_size))
+gg <- gg + guides(fill = guide_colorbar(title.position="top",
+                                        title.hjust = 0.5))
+gg_tab <- gg
+
+
+this_dfPlotTot$Region <- paste0("World\n(", this_dfPlotTot$Scenario, ")")
+  gg <- ggplot(this_dfPlotTot, aes(x = Commodity,
+                             y = Region,
+                             fill = `WSR-No WSR (Difference)`,
+                             label = `WSR-No WSR (Difference)`))
+gg <- gg + geom_tile()
+gg <- gg + geom_text(size = cellText_size)
+gg <- gg + scale_fill_gradient2(low = "magenta",
+                                mid = "white",
+                                high = "cyan",
+                                midpoint = 0)
+#gg <- gg + facet_wrap(~Year)
+gg <- gg + theme_bw()
+gg <- gg + theme(strip.background = element_blank(),
+                 strip.text = element_blank(),
+                 axis.title = element_blank(),
+                 axis.text.y = element_text(size = axisText_size),
+                 axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
+                 legend.position = "none")#,
+#                  legend.text = element_text(size = legendText_size),
+#                  legend.title = element_text(size = legendText_size),
+#                  plot.title = element_text(size = title_size))
+# gg <- gg + guides(fill = guide_colorbar(title.position="top",
+#                                         title.hjust = 0.5))
+gg_tabTot <- gg
+
+if(i > 1){
+  gg_tab <- gg_tab + theme(axis.text.y = element_blank())
+  gg_tabTot <- gg_tabTot + theme(axis.text.y = element_blank())
+}
+if(i < 3){
+  gg_tab <- gg_tab + theme(strip.background.y = element_blank(),
+                   strip.text.y = element_blank())
+    gg_tabTot <- gg_tabTot + theme(strip.background.y = element_blank(),
+                   strip.text.y = element_blank())
+}
+
+gg <- gg_tab + gg_tabTot + plot_layout(ncol = 1, heights = c(1, 1 / 6))
+
+
+list_gg[[i]] <- gg
+
+}
+
+#list_gg[[1]]
+
+wrap_plots(list_gg) + plot_annotation(title = thisTitle) & theme(plot.title = element_text(size = title_size))
+
+
+```
+
+```{r mentionSupVars, echo=F}
+# Get supply vars to be discussed in text
+df_sup <- subset(df_overView, param %in% supplyParams &
+                   Commodity %in% theseCommods)
+df_sup <- df_sup %>% spread(Scenario, Val)
+df_sup$`Best case` <- df_sup$`CC+WSR (best case)` - df_sup$`CC No WSR`
+df_sup$`Worst case` <- df_sup$`CC+WSR (worst case)` - df_sup$`CC No WSR`
+df_sup$`CC No WSR` <- NULL
+df_sup$`CC+WSR (best case)` <- NULL
+df_sup$`CC+WSR (worst case)` <- NULL
+df_sup <- df_sup %>% gather(Scenario, `WSR-No WSR (Difference)`, `Best case`:`Worst case`)
+df_sup$`WSR-No WSR (Difference)`[grep("Yield", df_sup$param)] <- 1000 * df_sup$`WSR-No WSR (Difference)`[grep("Yield", df_sup$param)]
+df_sup$`WSR-No WSR (Difference)` <- round(df_sup$`WSR-No WSR (Difference)`, 0)
+#--------------------------------------------------------------------------
+df_sup$`WSR-No WSR (Difference)` <- abs(df_sup$`WSR-No WSR (Difference)`)
+#==========================================================================
+# Wheat Production 2033 World
+prodWLDwhea2033B <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+prodWLDwhea2033W <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Production 2050 World
+prodWLDwhea2050B <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2050 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+prodWLDwhea2050W <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2050 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Production 2033 West Asia & North Africa
+prodWANAwhea2033B <- subset(df_sup, Region == "West Asia &\nNorth Africa" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+prodWANAwhea2033W <- subset(df_sup, Region == "West Asia &\nNorth Africa" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Production 2033 Former USSR
+prodFSUwhea2033B <- subset(df_sup, Region == "Former USSR" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+prodFSUwhea2033W <- subset(df_sup, Region == "Former USSR" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Production 2033 Europe
+prodEURwhea2033B <- subset(df_sup, Region == "Europe" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+prodEURwhea2033W <- subset(df_sup, Region == "Europe" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Production 2033 LAC
+prodLACwhea2033B <- subset(df_sup, Region == "Latin America\n& Caribbean" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+prodLACwhea2033W <- subset(df_sup, Region == "Latin America\n& Caribbean" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Area 2033 World
+areaWLDwhea2033B <- subset(df_sup, Region == "World" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+areaWLDwhea2033W <- subset(df_sup, Region == "World" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Area 2033 South Asia
+areaSASwhea2033B <- subset(df_sup, Region == "South Asia" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+areaSASwhea2033W <- subset(df_sup, Region == "South Asia" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Area 2033 N. America
+areaNAMwhea2033B <- subset(df_sup, Region == "N. America" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+areaNAMwhea2033W <- subset(df_sup, Region == "N. America" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Area 2033 Europe
+areaEURwhea2033B <- subset(df_sup, Region == "Europe" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+areaEURwhea2033W <- subset(df_sup, Region == "Europe" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Area 2033 East Asia & Pacific
+areaEAPwhea2033B <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+areaEAPwhea2033W <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat area 2033 former USSR
+areaFSUwhea2033B <- subset(df_sup, Region == "Former USSR" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+areaFSUwhea2033W <- subset(df_sup, Region == "Former USSR" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat Area 2033 LAC
+areaLACwhea2033B <- subset(df_sup, Region == "Latin America\n& Caribbean" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+areaLACwhea2033W <- subset(df_sup, Region == "Latin America\n& Caribbean" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Other cereals Production 2033 World
+prodWLDocer2033B <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+prodWLDocer2033W <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Production 2050 World
+prodWLDocer2050B <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2050 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+prodWLDocer2050W <- subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2050 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+# Other cereals Production 2033 N. America
+prodNAMocer2033B <- subset(df_sup, Region == "N. America" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+prodNAMocer2033W <- subset(df_sup, Region == "N. America" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Production 2033 East Asia & Pacific
+prodEAPocer2033B <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+prodEAPocer2033W <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Production 2033 Europe
+prodEURocer2033B <- subset(df_sup, Region == "Europe" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+prodEURocer2033W <- subset(df_sup, Region == "Europe" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Area 2033 World
+areaWLDocer2033B <- subset(df_sup, Region == "World" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+areaWLDocer2033W <- subset(df_sup, Region == "World" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Area 2033 South Asia
+areaSASocer2033B <- subset(df_sup, Region == "South Asia" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+areaSASocer2033W <- subset(df_sup, Region == "South Asia" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Area 2033 N. America
+areaNAMocer2033B <- subset(df_sup, Region == "N. America" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+areaNAMocer2033W <- subset(df_sup, Region == "N. America" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Area 2033 Europe
+areaEURocer2033B <- subset(df_sup, Region == "Europe" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+areaEURocer2033W <- subset(df_sup, Region == "Europe" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+# Other cereals Area 2033 East Asia & Pacific
+areaEAPocer2033B <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Area" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+areaEAPocer2033W <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Area" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`
+
+# Wheat yield 2033 Africa South of the Sahara
+ydSSAwhea2033B <- subset(df_sup, Region == "Africa South\nof the Sahara" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydSSAwhea2033W <- subset(df_sup, Region == "Africa South\nof the Sahara" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+# Wheat yield 2033 N. America
+ydNAMwhea2033B <- subset(df_sup, Region == "N. America" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydNAMwhea2033W <- subset(df_sup, Region == "N. America" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+# Wheat yield 2033 Latin America & the Caribbean
+ydLACwhea2033B <- subset(df_sup, Region == "Latin America\n& Caribbean" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydLACwhea2033W <- subset(df_sup, Region == "Latin America\n& Caribbean" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat yield 2033 East Asia & Pacific
+ydEAPwhea2033B <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydEAPwhea2033W <- subset(df_sup, Region == "East Asia &\nPacific" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat yield 2033 Europe
+ydEURwhea2033B <- subset(df_sup, Region == "Europe" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydEURwhea2033W <- subset(df_sup, Region == "Europe" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+# Wheat yield 2033 South Asia
+ydSASwhea2033B <- subset(df_sup, Region == "South Asia" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydSASwhea2033W <- subset(df_sup, Region == "South Asia" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+# Wheat yield 2033 West Asia & North Africa
+ydWANAwhea2033B <- subset(df_sup, Region == "West Asia &\nNorth Africa" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydWANAwhea2033W <- subset(df_sup, Region == "West Asia &\nNorth Africa" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+# Wheat yield 2033 Former USSR
+ydFSUwhea2033B <- subset(df_sup, Region == "Former USSR" &
+                             param == "Yield" &
+                             Scenario == "Best case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+ydFSUwhea2033W <- subset(df_sup, Region == "Former USSR" &
+                             param == "Yield" &
+                             Scenario == "Worst case" &
+                             Year == 2033 &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`
+
+# Cumulative wheat production 2033 World
+prodCumWLDwhea2033B <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year %in% c(2020:2033) &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`)
+
+prodCumWLDwhea2033W <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year %in% c(2020:2033) &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`)
+# Cumulative wheat production 2050 World
+prodCumWLDwhea2050B <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year %in% c(2020:2050) &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`)
+
+prodCumWLDwhea2050W <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year %in% c(2020:2050) &
+                             Commodity == "Wheat")$`WSR-No WSR (Difference)`)
+# Cumulative other cereals production 2033 World
+prodCumWLDocer2033B <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year %in% c(2020:2033) &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`)
+
+prodCumWLDocer2033W <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year %in% c(2020:2033) &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`)
+# Cumulative other cereals production 2050 World
+prodCumWLDocer2050B <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Best case" &
+                             Year %in% as.character(c(2020:2050)) &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`)
+
+prodCumWLDocer2050W <- sum(subset(df_sup, Region == "World" &
+                             param == "Production" &
+                             Scenario == "Worst case" &
+                             Year %in% c(2020:2050) &
+                             Commodity == "Other cereals")$`WSR-No WSR (Difference)`)
+
+
+
+```
+
+## Demand side impacts
+
+The projected supply shortfalls discussed above are reflected in lower demand for wheat across all demand categories, relative to the No-WSR baseline. Globally, wheat consumption in an outbreak year is projected to be `r totDemWLDwhea2033B/1000`-`r totDemWLDwhea2033W/1000` million metric tons lower than the No-WSR baseline. The decline is projected to come primarily in the form of reduced household and livestock feed demand, and is particularly concerning since it is not compensated by a projected increase in the consumption of other staples. On the contrary, household consumption of other commodities is projected to remain the same or decline slightly relative to the No-WSR baseline, across all regions (see Figure \ref{fig:demGraphicMag}).
+<!-- One potentially compensating mechanism is a moderate projected increase in livestock feed demand for other cereals in South Asia and Europe, which then translates into higher animal product calories in these regions. However, at the global scale, this development is dwarfed by large projected reductions in livestock feed demand in North America and the East Asia & Pacific region. -->
+
+Lower wheat demand is also projected to come primarily in the form of lower export demand, as WSR has a reshuffling effect on countries' comparative advantages in trade and agriculture. Regions currently enjoying a comparative advantage in wheat trade, but with a high anticipated incidence of WSR, are projected to export considerably less than under the No-WSR baseline scenario, while wheat growing regions with a relatively lower anticipated incidence of WSR are projected to pick up the slack, increasing their exports above the No-WSR baseline.
+
+In the Former USSR region, for example, wheat exports are projected to fall below the No-WSR baseline by `r expDemFSUwhea2033B/1000`-`r expDemFSUwhea2033W/1000` million metric tons, while wheat exports in Europe are projected to increase above the No-WSR baseline by `r expDemEURwhea2033B/1000`-`r expDemEURwhea2033W/1000` million metric tons. Likewise, the projected reduction in livestock feed demand for wheat and other cereals in East Asia & the Pacific is offset to a large degree by a projected increase in exports from this region. However, globally, projected reductions in export demand outweigh projected increases. In a typical outbreak year, the multimarket modeling suggests that there could be `r expDemWLDwhea2033B`-`r expDemWLDwhea2033W` thousand metric tons less wheat circulating on the international market.
+
+```{r, fig.show='hold', fig.width=8, fig.height=8, fig.align='center', ft.align = "center", fig.cap="\\label{fig:demGraphicMag}...", echo=FALSE}
+
+df_dem <- subset(df_overView, param %in% demandParams &
+                   Commodity %in% theseCommods)
+df_dem$param[grep("HH", df_dem$param)] <- "HH Demand"
+df_dem <- df_dem %>% group_by(Region, param, Commodity, Year, Scenario) %>%
+  summarise(Val = sum(Val, na.rm = T)) %>% as.data.frame()
+#---
+df_dem <- df_dem %>% spread(Scenario, Val)
+df_dem$`Best case` <- df_dem$`CC+WSR (best case)` - df_dem$`CC No WSR`
+df_dem$`Worst case` <- df_dem$`CC+WSR (worst case)` - df_dem$`CC No WSR`
+df_dem$`CC No WSR` <- NULL
+df_dem$`CC+WSR (best case)` <- NULL
+df_dem$`CC+WSR (worst case)` <- NULL
+df_dem <- df_dem %>% gather(Scenario, `WSR-No WSR (Difference 1000 metric tons)`, `Best case`:`Worst case`)
+df_dem$`WSR-No WSR (Difference 1000 metric tons)` <- round(df_dem$`WSR-No WSR (Difference 1000 metric tons)`, 0) 
+
+df_plot <- subset(df_dem, Year == 2024 &
+                    param != "Intermediate Demand")
+u <- df_plot$`WSR-No WSR (Difference 1000 metric tons)`
+df_plot$`WSR-No WSR (Difference 1000 metric tons)`[which(is.nan(u))] <- 0
+thisTitle <- "Wheat stem rust impact on main demand categories in an outbreak year, by region\n(Difference in 1000 metric tons, WSR - No WSR)"
+
+df_plotTot <- subset(df_plot, Region == "World")
+df_plot <- subset(df_plot, Region != "World")
+
+gg <- ggplot(df_plot, aes(x = Commodity,
+                          y = Region,
+                          fill = `WSR-No WSR (Difference 1000 metric tons)`,
+                          label = `WSR-No WSR (Difference 1000 metric tons)`))
+gg <- gg + geom_tile()
+gg <- gg + geom_text(size = cellText_size)
+gg <- gg + scale_fill_gradient2(low = "magenta",
+                                mid = "white",
+                                high = "cyan",
+                                midpoint = 0)
+gg <- gg + facet_grid(Scenario~param)
+#gg <- gg + facet_wrap(~Scenario)
+gg <- gg + labs(title = thisTitle)
+gg <- gg + theme_bw()
+gg <- gg + theme(strip.background = element_rect(fill = "white"),
+                 strip.text = element_text(size = facetTitle_size),
+                 axis.title = element_blank(),
+                 axis.text.y = element_text(size = axisText_size),
+                 axis.text.x = element_blank(),
+                 plot.title = element_text(size = title_size),
+                 legend.position = "none"#,
+                 # legend.text = element_text(size = legendText_size),
+                 # legend.title = element_text(size = legendText_size)
+)
+gg <- gg + guides(fill = guide_colorbar(title.position="top",
+                                        title.hjust = 0.5))
+gg_tab <- gg
+
+
+
+df_plotTot$Region <- paste0("World\n(", df_plotTot$Scenario, ")")
+gg <- ggplot(df_plotTot, aes(x = Commodity,
+                             y = Region,
+                             fill = `WSR-No WSR (Difference 1000 metric tons)`,
+                             label = `WSR-No WSR (Difference 1000 metric tons)`))
+gg <- gg + geom_tile()
+gg <- gg + geom_text(size = cellText_size)
+gg <- gg + scale_fill_gradient2(low = "magenta",
+                                mid = "white",
+                                high = "cyan",
+                                midpoint = 0)
+gg <- gg + facet_wrap(~param, nrow = 1)
+gg <- gg + theme_bw()
+gg <- gg + theme(strip.background = element_blank(),
+                 strip.text = element_blank(),
+                 axis.title = element_blank(),
+                 axis.text.y = element_text(size = axisText_size),
+                 axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
+                 legend.position = "none")
+gg_tabTot <- gg
+
+
+gg_tab + gg_tabTot + plot_layout(ncol = 1, heights = c(1, 1 / 6))
+
+
+
+```
+
+```{r mentionDemVars, echo=F}
+
+#===========================================================================
+# Get demand vars to be mentioned in text
+df_dem <- subset(df_overView, param %in% demandParams &
+                   Commodity %in% theseCommods)
+df_dem$param[grep("HH", df_dem$param)] <- "HH Demand"
+df_dem <- df_dem %>% group_by(Region, param, Commodity, Year, Scenario) %>%
+  summarise(Val = sum(Val, na.rm = T)) %>% as.data.frame()
+#---
+df_dem <- df_dem %>% spread(Scenario, Val)
+df_dem$`Best case` <- df_dem$`CC+WSR (best case)` - df_dem$`CC No WSR`
+df_dem$`Worst case` <- df_dem$`CC+WSR (worst case)` - df_dem$`CC No WSR`
+df_dem$`CC No WSR` <- NULL
+df_dem$`CC+WSR (best case)` <- NULL
+df_dem$`CC+WSR (worst case)` <- NULL
+df_dem <- df_dem %>% gather(Scenario, `WSR-No WSR (Difference 1000 metric tons)`, `Best case`:`Worst case`)
+df_dem$`WSR-No WSR (Difference 1000 metric tons)` <- round(df_dem$`WSR-No WSR (Difference 1000 metric tons)`, 0) 
+#---------------------------------------------------------------------------
+df_dem$`WSR-No WSR (Difference 1000 metric tons)` <- abs(df_dem$`WSR-No WSR (Difference 1000 metric tons)`) 
+#===========================================================================
+# Wheat Total demand - world
+totDemWLDwhea2033B <- subset(df_dem, Region == "World" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+totDemWLDwhea2033W <- subset(df_dem, Region == "World" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+# Wheat Livestock demand - world
+lsDemWLDwhea2033B <- subset(df_dem, Region == "World" &
+                              param == "Livestock Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Best case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+lsDemWLDwhea2033W <- subset(df_dem, Region == "World" &
+                              param == "Livestock Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Worst case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+# Wheat HH demand - world
+hhDemWLDwhea2033B <- subset(df_dem, Region == "World" &
+                              param == "HH Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Best case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+hhDemWLDwhea2033W <- subset(df_dem, Region == "World" &
+                              param == "HH Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Worst case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Wheat Export demand - world
+expDemWLDwhea2033B <- subset(df_dem, Region == "World" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+expDemWLDwhea2033W <- subset(df_dem, Region == "World" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Wheat Export demand - South Asia
+expDemSASwhea2033B <- subset(df_dem, Region == "South Asia" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+expDemSASwhea2033W <- subset(df_dem, Region == "South Asia" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Wheat Export demand - Europe
+expDemEURwhea2033B <- subset(df_dem, Region == "Europe" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+expDemEURwhea2033W <- subset(df_dem, Region == "Europe" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Wheat Export demand - Former USSR
+expDemFSUwhea2033B <- subset(df_dem, Region == "Former USSR" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+expDemFSUwhea2033W <- subset(df_dem, Region == "Former USSR" &
+                               param == "Export" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Wheat total demand - Europe
+totDemEURwhea2033B <- subset(df_dem, Region == "Europe" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+totDemEURwhea2033W <- subset(df_dem, Region == "Europe" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+# Wheat HH demand - South Asia
+hhDemSASwhea2033B <- subset(df_dem, Region == "South Asia" &
+                              param == "HH Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Best case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+hhDemSASwhea2033W <- subset(df_dem, Region == "South Asia" &
+                              param == "HH Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Worst case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+# Wheat HH demand - East Asia & Pacific
+hhDemEAPwhea2033B <- subset(df_dem, Region == "East Asia &\nPacific" &
+                              param == "HH Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Best case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+hhDemEAPwhea2033W <- subset(df_dem, Region == "East Asia &\nPacific" &
+                              param == "HH Demand" &
+                              Commodity == "Wheat" &
+                              Scenario == "Worst case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Other cereals total demand - World
+totDemWLDocer2033B <- subset(df_dem, Region == "World" &
+                               param == "Total Demand" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+totDemWLDocer2033W <- subset(df_dem, Region == "World" &
+                               param == "Total Demand" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Other cereals livestock feed demand - World
+lsDemWLDocer2033B <- subset(df_dem, Region == "World" &
+                              param == "Livestock\nFeed Demand" &
+                              Commodity == "Other cereals" &
+                              Scenario == "Best case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+lsDemWLDocer2033W <- subset(df_dem, Region == "World" &
+                              param == "Livestock\nFeed Demand" &
+                              Commodity == "Other cereals" &
+                              Scenario == "Worst case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Other cereals livestock feed demand - N. America
+lsDemNAMocer2033B <- subset(df_dem, Region == "N. America" &
+                              param == "Livestock\nFeed Demand" &
+                              Commodity == "Other cereals" &
+                              Scenario == "Best case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+lsDemNAMocer2033W <- subset(df_dem, Region == "N. America" &
+                              param == "Lovestock Feed Demand" &
+                              Commodity == "Other cereals" &
+                              Scenario == "Worst case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Other cereals total demand - N. America
+totDemNAMocer2033B <- subset(df_dem, Region == "N. America" &
+                               param == "Total Demand" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+totDemNAMocer2033W <- subset(df_dem, Region == "N. America" &
+                               param == "Total Demand" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Other cereals total demand - East Asia and Pacific
+totDemEAPocer2033B <- subset(df_dem, Region == "East Asia &\nPacific" &
+                               param == "Total Demand" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+totDemEAPocer2033W <- subset(df_dem, Region == "East Asia &\nPacific" &
+                               param == "Total Demand" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Other cereals livestock feed demand - East Asia and Pacific
+lsDemEAPocer2033B <- subset(df_dem, Region == "East Asia &\nPacific" &
+                              param == "Livestock\nFeed Demand" &
+                              Commodity == "Other cereals" &
+                              Scenario == "Best case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+lsDemEAPocer2033W <- subset(df_dem, Region == "East Asia &\nPacific" &
+                              param == "Livestock\nFeed Demand" &
+                              Commodity == "Other cereals" &
+                              Scenario == "Worst case" &
+                              Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Other cereals export demand - East Asia and Pacific
+expDemEAPocer2033B <- subset(df_dem, Region == "East Asia &\nPacific" &
+                               param == "Export" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+expDemEAPocer2033W <- subset(df_dem, Region == "East Asia &\nPacific" &
+                               param == "Export" &
+                               Commodity == "Other cereals" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Wheat total demand South Asia
+totDemSASwhea2033B <- subset(df_dem, Region == "South Asia" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+totDemSASwhea2033W <- subset(df_dem, Region == "South Asia" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+# Wheat total demand South Asia
+totDemEAPwhea2033B <- subset(df_dem, Region == "East Asia &\nPacific" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Best case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+totDemEAPwhea2033W <- subset(df_dem, Region == "East Asia &\nPacific" &
+                               param == "Total Demand" &
+                               Commodity == "Wheat" &
+                               Scenario == "Worst case" &
+                               Year == 2033)$`WSR-No WSR (Difference 1000 metric tons)`
+
+
+
+```
+
+## Impact on food security
+
+In terms of food security, the demand side impacts presented above suggest that a global WSR outbreak could result in a considerable global decline in calorie availability relative to the No-WSR baseline. The decline is projected to occur primarily in wheat, as one might expect; but is also projected to extend across all other cereals and major staple food categories. These spillover effects are the result of countries in non-outbreak areas reallocating resources from non-wheat staples to wheat in order to take advantage of the high wheat export price.
+
+In non-outbreak countries, this reallocation of resources is also effectively a reallocation away from the domestic market to the export market. While this helps to offset the calorie deficit in outbreak countries, it also precipitates a major calorie deficit in non-outbreak countries, relative to the No-WSR baseline. This leads to the somewhat surprising result that the projected WSR induced calorie deficit is most pronounced in the South Asia and East Asia & Pacific regions, where the surveyed experts indicate relatively little or no expected incidence of WSR.
+
+Food availability is, of course, just one of the four pillars of food security. While IMPACT does not explicitly model the other three pillars of food security (access, utilization, and stability), it does model numbers of people at risk of hunger, and numbers of undernourished children, which may be considered indirect measures of food security. The population at risk of hunger indicator is a straightforward calculation of the ratio of available calories to a minimum level of required calories. The numbers of undernourished children indicator is calculated as a function of average per capita calorie consumption, female access to secondary education, the quality of maternal and child care, and health and sanitation, and is based on a well documented empirical relation [@robinson2015international].
+
+Globally, the total number of people at risk of hunger in a typical outbreak year is projected to rise above the No-WSR baseline by `r round(popRskWLD2045B/1000, 3)`-`r round(popRskWLD2045W/1000, 3)` million, and numbers of undernourished children are projected to rise above the No-WSR baseline by `r uChldWLD2045B`-`r uChldWLD2045W` thousand (Figure \ref{fig:foodSecMag}). Projected impacts are concentrated in the South Asia, Africa South of the Sahara, and East Asia & Pacific regions, where the number of people at risk of hunger may rise above the No-WSR baseline by `r round(popRskSAS2045B/1000, 3)`-`r round(popRskSAS2045W/1000, 3)`, `r round(popRskSSA2045B/1000, 3)`-`r round(popRskSSA2045W/1000, 3)`, and `r round(popRskEAP2045B/1000, 3)`-`r round(popRskEAP2045W/1000, 3)` million, respectively.
+
+```{r, fig.show='hold', fig.width=6, fig.height=6, fig.align='left', ft.align = "center", fig.cap="\\label{fig:foodAvailMag}...", echo=FALSE}
+
+df_avail <- subset(df_overView, param == "Availability\n(kcal/capita/day)" &
+                     Commodity %in% theseCommods)
+#---
+df_avail <- df_avail %>% spread(Scenario, Val)
+df_avail$`Best case` <- round(df_avail$`CC+WSR (best case)` - df_avail$`CC No WSR`, 1)
+df_avail$`Worst case` <- round(df_avail$`CC+WSR (worst case)` - df_avail$`CC No WSR`, 1)
+df_avail$`CC No WSR` <- NULL
+df_avail$`CC+WSR (best case)` <- NULL
+df_avail$`CC+WSR (worst case)` <- NULL
+df_avail <- df_avail %>% gather(Scenario, `WSR-No WSR (Difference kcal/capita/day)`, `Best case`:`Worst case`)
+
+df_plot <- subset(df_avail, Year %in% c(2045))
+df_plotTot <- subset(df_plot, Region == "World")
+df_plot <- subset(df_plot, Region != "World")
+
+thisTitle <- "Wheat stem rust impact on food availability in an outbreak year, by region\n(Difference in kcal/capita/day, WSR - No WSR)"
+
+gg <- ggplot(df_plot, aes(x = Commodity,
+                          y = Region,
+                          fill = `WSR-No WSR (Difference kcal/capita/day)`,
+                          label = `WSR-No WSR (Difference kcal/capita/day)`))
+gg <- gg + geom_tile()
+gg <- gg + geom_text(size = cellText_size)
+gg <- gg + scale_fill_gradient2(low = "magenta",
+                                mid = "white",
+                                high = "cyan",
+                                midpoint = 0)
+#gg <- gg + facet_grid(Scenario~Year)
+gg <- gg + facet_wrap(~Scenario)
+gg <- gg + labs(title = thisTitle)
+gg <- gg + theme_bw()
+gg <- gg + theme(strip.background = element_rect(fill = "white"),
+                 strip.text = element_text(size = facetTitle_size),
+                 axis.title = element_blank(),
+                 axis.text = element_text(size = axisText_size),
+                 #axis.text.x = element_blank(),
+                 plot.title = element_text(size = title_size),
+                 legend.position = "none")#,
+#legend.text = element_text(size = legendText_size),
+#legend.title = element_text(size = legendText_size))
+# gg <- gg + guides(fill = guide_colorbar(title.position="top",
+#                                         title.hjust = 0.5))
+gg_tab <- gg
+
+#===========================================================================
+df_plotTot$Region <- paste0("World (", df_plotTot$Scenario, ")")
+
+gg <- ggplot(df_plotTot, aes(x = Commodity,
+                             y = Region,
+                             fill = `WSR-No WSR (Difference kcal/capita/day)`,
+                             label = `WSR-No WSR (Difference kcal/capita/day)`))
+gg <- gg + geom_tile()
+gg <- gg + geom_text(size = cellText_size)
+gg <- gg + scale_fill_gradient2(low = "magenta",
+                                mid = "white",
+                                high = "cyan",
+                                na.value = "grey",
+                                midpoint = 0)
+gg <- gg + facet_wrap(~Year, nrow = 1)
+gg <- gg + theme_bw()
+gg <- gg + theme(axis.title = element_blank(),
+                 axis.text.y = element_text(size = axisText_size),
+                 axis.text.x = element_text(size = axisText_size, angle = 60,
+                                            hjust = 1),
+                 legend.position = "none",
+                 strip.background = element_blank(),
+                 strip.text = element_blank())
+gg_tabTot <- gg
+
+#-------------------------------------------------------------------------
+
+#gg_tab + gg_tabTot + plot_layout(ncol = 1, heights = c(1, 1 / 6))
+
+
+```
+
+```{r, fig.show='hold', fig.width=5, fig.height=5, fig.align='left', ft.align = "center", fig.cap="\\label{fig:foodSecMag}Each number is the difference between the value with wheat stem rust and the value without wheat stem rust. Both scenarios account for climate change.", echo=FALSE}
+
+these_params <- c("Pop at Risk of Hunger", "Undernourished Children")
+df_foodSec <- subset(df_overView, param %in% these_params)
+df_foodSec$Commodity <- NULL
+#---
+these_yrs <- c(2045)
+#---
+df_foodSec <- df_foodSec %>% spread(Scenario, Val)
+df_foodSec$`Best case` <- round(1000 * (df_foodSec$`CC+WSR (best case)` - df_foodSec$`CC No WSR`), 1)
+df_foodSec$`Worst case` <- round(1000 * (df_foodSec$`CC+WSR (worst case)` - df_foodSec$`CC No WSR`), 1)
+df_foodSec$`CC No WSR` <- NULL
+df_foodSec$`CC+WSR (best case)` <- NULL
+df_foodSec$`CC+WSR (worst case)` <- NULL
+
+df_add <- data.frame(Region = "N. America", param = "Undernourished Children",                      Year = these_yrs,
+                     `Best case` = 0,
+                     `Worst case` = 0)
+colnames(df_add) <- gsub("\\.", " ", colnames(df_add))
+df_foodSec <- as.data.frame(rbind(df_foodSec, df_add))
+
+df_foodSec <- df_foodSec %>% gather(Scenario, `WSR-No WSR\n(Difference 1000 persons)`, `Best case`:`Worst case`) %>% as.data.frame()
+#---
+df_plot <- subset(df_foodSec, Year %in% these_yrs)
+df_plot$Year <- as.character(df_plot$Year)
+df_plotTot <- subset(df_plot, Region == "World")
+df_plot <- subset(df_plot, Region != "World")
+
+thisTitle <- "Wheat stem rust impact on food security indicators in an outbreak year\n(Difference in 1000s of persons, WSR - No WSR)"
+
+theseParams <- unique(df_plot$param)
+list_gg <- list()
+for(i in 1:length(theseParams)){
+  thisParam <- theseParams[i]
+  this_dfPlot <- subset(df_plot, param == thisParam)
+  
+  gg <- ggplot(this_dfPlot, aes(x = Scenario,
+                                y = Region,
+                                fill = `WSR-No WSR\n(Difference 1000 persons)`,
+                                label = `WSR-No WSR\n(Difference 1000 persons)`))
+  gg <- gg + geom_tile()
+  gg <- gg + geom_text(size = cellText_size)
+  gg <- gg + scale_fill_gradient2(low = "cyan",
+                                  mid = "white",
+                                  high = "magenta",
+                                  midpoint = 0)
+  gg <- gg + labs(title = thisParam)
+  #gg <- gg + facet_wrap(~Scenario)
+  gg <- gg + theme_bw()
+  gg <- gg + theme(strip.background = element_rect(fill = "white"),
+                   strip.text = element_text(size = facetTitle_size),
+                   axis.title = element_blank(),
+                   axis.text.y = element_text(size = axisText_size),
+                   axis.text.x = element_blank(),
+                   plot.title = element_text(size = title_size),
+                   legend.position = "top",
+                   legend.text = element_text(size = legendText_size),
+                   legend.title = element_text(size = legendText_size))
+  gg <- gg + guides(fill = guide_colorbar(title.position="top",
+                                          title.hjust = 0.5))
+  gg_tab <- gg
+  
+  #=========================================================================
+  #df_plotTot$Region <- paste0("World (", df_plotTot$Scenario, ")")
+  
+  this_dfPlotTot <- subset(df_plotTot, param == thisParam)
+  gg <- ggplot(this_dfPlotTot, aes(x = Scenario,
+                                   y = Region,
+                                   fill = `WSR-No WSR\n(Difference 1000 persons)`,
+                                   label = `WSR-No WSR\n(Difference 1000 persons)`))
+  gg <- gg + geom_tile()
+  gg <- gg + geom_text(size = cellText_size)
+  gg <- gg + scale_fill_gradient2(low = "cyan",
+                                  mid = "white",
+                                  high = "magenta",
+                                  na.value = "grey",
+                                  midpoint = 0)
+  
+  #gg <- gg + facet_wrap(~Scenario, nrow = 1)
+  gg <- gg + theme_bw()
+  gg <- gg + theme(strip.background = element_blank(),
+                   strip.text = element_blank(),
+                   axis.title = element_blank(),
+                   axis.text.y = element_text(size = axisText_size),
+                   axis.text.x = element_text(size = axisText_size),
+                   legend.position = "none")
+  gg_tabTot <- gg
+  
+  if(i == 2){
+    gg_tab <- gg_tab + theme(axis.text.y = element_blank())
+    gg_tabTot <- gg_tabTot + theme(axis.text.y = element_blank())
+  }
+  
+  list_gg[[i]] <- gg_tab + gg_tabTot + plot_layout(heights = c(1, 1 / 6))
+  
+}
+#-------------------------------------------------------------------------
+wrap_plots(list_gg) + plot_annotation(title = thisTitle) & theme(plot.title = element_text(size = title_size))
+
+
+```
+
+```{r mentionFoodSecVars, echo=F}
+#==========================================================================
+#==========================================================================
+#==========================================================================
+# Extract vars to appear in text
+these_params <- c("Pop at Risk of Hunger", "Undernourished Children")
+df_foodSec <- subset(df_overView, param %in% these_params)
+df_foodSec$Commodity <- NULL
+#---
+these_yrs <- c(2045, 2050)
+#---
+df_foodSec <- df_foodSec %>% spread(Scenario, Val)
+df_foodSec$`Best case` <- round(1000 * (df_foodSec$`CC+WSR (best case)` - df_foodSec$`CC No WSR`), 1)
+df_foodSec$`Worst case` <- round(1000 * (df_foodSec$`CC+WSR (worst case)` - df_foodSec$`CC No WSR`), 1)
+df_foodSec$`CC No WSR` <- NULL
+df_foodSec$`CC+WSR (best case)` <- NULL
+df_foodSec$`CC+WSR (worst case)` <- NULL
+
+df_add <- data.frame(Region = "N. America", param = "Undernourished Children",                      Year = these_yrs,
+                     `Best case` = 0,
+                     `Worst case` = 0)
+colnames(df_add) <- gsub("\\.", " ", colnames(df_add))
+df_foodSec <- as.data.frame(rbind(df_foodSec, df_add))
+
+df_foodSec <- df_foodSec %>% gather(Scenario, `WSR-No WSR\n(Difference 1000 persons)`, `Best case`:`Worst case`) %>% as.data.frame()
+
+#==========================================================================
+# Pop at risk of hunger - World
+popRskWLD2045B <- subset(df_foodSec,
+                         Region == "World" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+popRskWLD2050B <- subset(df_foodSec,
+                         Region == "World" &
+                           Year == 2050 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+popRskWLD2045W <- subset(df_foodSec,
+                         Region == "World" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+popRskWLD2050W <- subset(df_foodSec,
+                         Region == "World" &
+                           Year == 2050 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+#=========================================================================
+# Undernourished children - World
+
+uChldWLD2045B <- subset(df_foodSec,
+                        Region == "World" &
+                          Year == 2045 &
+                          param == "Undernourished Children" &
+                          Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+uChldWLD2050B <- subset(df_foodSec,
+                        Region == "World" &
+                          Year == 2050 &
+                          param == "Undernourished Children" &
+                          Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+uChldWLD2045W <- subset(df_foodSec,
+                        Region == "World" &
+                          Year == 2045 &
+                          param == "Undernourished Children" &
+                          Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+uChldWLD2050W <- subset(df_foodSec,
+                        Region == "World" &
+                          Year == 2050 &
+                          param == "Undernourished Children" &
+                          Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+#===========================================================================
+# Pop at risk of hunger - South Asia
+popRskSAS2045B <- subset(df_foodSec,
+                         Region == "South Asia" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+popRskSAS2045W <- subset(df_foodSec,
+                         Region == "South Asia" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+#===========================================================================
+# Pop at risk of hunger - East Asia & Pacific
+popRskEAP2045B <- subset(df_foodSec,
+                         Region == "East Asia &\nPacific" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+popRskEAP2045W <- subset(df_foodSec,
+                         Region == "East Asia &\nPacific" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+#=========================================================================
+# Undernourished children - South Asia
+uChldSAS2045B <- subset(df_foodSec,
+                        Region == "South Asia" &
+                          Year == 2045 &
+                          param == "Undernourished Children" &
+                          Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+uChldSAS2050W <- subset(df_foodSec,
+                        Region == "South Asia" &
+                          Year == 2050 &
+                          param == "Undernourished Children" &
+                          Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+# uChldSSA2045B <- subset(df_foodSec,
+#                         Region == "Africa" &
+#                           Year == 2045 &
+#                           param == "Undernourished Children" &
+#                           Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+# 
+# uChldSSA2050W <- subset(df_foodSec,
+#                         Region == "Africa.." &
+#                           Year == 2050 &
+#                           param == "Undernourished Children" &
+#                           Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+#=========================================================================
+# Pop at risk of hunger - Africa South of the Sahara
+popRskSSA2045B <- subset(df_foodSec,
+                         Region == "Africa South\nof the Sahara" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+popRskSSA2045W <- subset(df_foodSec,
+                         Region == "Africa South\nof the Sahara" &
+                           Year == 2045 &
+                           param == "Pop at Risk of Hunger" &
+                           Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+#=========================================================================
+# Undernourished children - Africa South of the Sahara
+
+uChldSSA2045B <- subset(df_foodSec,
+                        Region == "Africa South\nof the Sahara" &
+                          Year == 2045 &
+                          param == "Undernourished Children" &
+                          Scenario == "Best case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+uChldSSA2045W <- subset(df_foodSec,
+                        Region == "Africa South\nof the Sahara" &
+                          Year == 2045 &
+                          param == "Undernourished Children" &
+                          Scenario == "Worst case")$`WSR-No WSR\n(Difference 1000 persons)`
+
+
+```
+
+# Discussion and conclusion
+
+The various components of WSR impacts, climatic, biophysical, economic, aerial spread, ... have been modeled piecemeal. Here we have attempted to integrate these different components into a single modeling framework.
+
+There are multiple factors contributing to the likelihood and severity of future WSR outbreaks, and hence considerable uncertainty surrounding estimates of corresponding economic impacts. The aim of this study is not to predict the most likely WSR impact pathway, but rather to identify the likely bounds of WSR impacts in terms of a best and worst case scenario.
+
+Best and worst case WSR outbreak scenarios were based on expected WSR yield shocks elicited from 11 international wheat experts. The IMPACT model was then used to compute the global economic repercussions of these exogenous shocks in terms of supply, demand, and food security indicators in a typical outbreak year.
+<!-- Indirect WSR yield shocks resulting from higher fungicide costs were also introduced. -->
+  
+  The results of the analysis are given for a single outbreak year. The experts surveyed suggested outbreaks may occur at 3-10 year intervals depending on the country. Assuming a global outbreak occurs every 5 years over the period 2025-2050, this works out to a cumulative wheat production shortfall of `r prodWLDwhea2033B*5/1000`-`r prodWLDwhea2033W*5/1000` million metric tons, relative to the No-WSR baseline, by 2050. The present analysis thus suggests that WSR induced wheat production shortfalls may be considerably more severe than the picture painted by Savary et al. [-@savary2019global], but somewhat less severe than the shortfalls estimated by Pardey et al. [-@pardey2013right].
+<!-- Indirect yield shocks due to higher fungicide costs are projected to have little impact due to small input price elasticities of yield. -->
+  
+  One novel aspect of the present exercise, compared to previous WSR impact studies, is the assessment of spillover effects across commodity markets and geographies. The results of this assessment suggest that future WSR induced grain shortfalls may not be limited to wheat, but extend to other staple commodities, especially other cereals. In addition to the cumulative wheat production shortfall, then, the present analysis projects a cumulative non-wheat cereal production shortfall of `r prodWLDocer2033B*5/1000`-`r prodWLDocer2033W*5/1000` million metric tons, relative to the No-WSR baseline, by 2050.
+
+Moreover, due to spillover effects, it turns out that the most severe WSR-induced food security impacts are projected for South Asia, a region where the surveyed experts expect no WSR outbreaks, and where wheat production in the WSR scenario is projected to rise higher than the No-WSR baseline. Africa South of the Sahara ranks second in terms of food security impacts relative to the No-WSR baseline, although it ranks fourth in terms of a wheat production shortfall. The East Asia & Pacific region ranks third in terms of food security impacts, although, like South Asia, it is projected to produce more wheat under the WSR scenario than under the No-WSR baseline scenario.
+
+The IMPACT projections presented in this study rest upon a few tacit assumptions beyond the Shared Socioeconomic Pathway and Representative Concentration Pathway made explicit in the Methodology section. Some of these assumptions are weak, such as the assumption of no major new developments in the pathology and virulence of WSR causing fungi out to 2050. However, some assumptions are quite strong. In particular, 1) WSR impacts are assumed to occur everywhere simultaneously, 2) other pathogens affecting wheat and other crops are omitted, whereas the study by Savary et al. [-@savary2019global] identifies dozens of pathogens likely to afflict wheat and other key crops in the coming decades; and 3) the equilibrium model assumes that markets react to WSR outbreaks instantaneously, whereas in reality there would generally be a lag of at least one cropping season between news of an outbreak and reallocation of farmland in response to price signals.
+
+Future research can weaken these assumptions by examining scenarios where outbreaks occur in different places at different times, and by considering the incidence of other plant pathogens in both wheat and other staple crop cultivation. Redressing the assumption of instantaneous market reactions may require a more nuanced modeling approach, and/or interpretation of results---one which takes more explicit account of, for example, the role of stocks in mitigating supply shocks, as well as the role of agroclimatic advisory services in alerting farmers to the likelihood of outbreaks.
+
+<!-- Future economic analyses of the potential supply, demand, and food security impacts of WSR that use an equilibrium model, it would be possible to weaken these assumptions considerably. It would also be straightforward to examine sensitivity of results to different assumptions regarding socioeconomic trends (SSPs) and climate change trajectories (RCPs), and to present more detailed analysis at the country level. -->
+  <!-- # Appendix -->
+  <!-- #### Supply side impacts expressed in percentage terms -->
+  <!-- # ```{r, fig.show='hold', fig.width=6, fig.height=6, fig.align='center', ft.align = "center", fig.cap="\\label{fig:supGraphicPct}Each number represents the percentage difference between the 2035 value with wheat stem rust and the 2035 value without wheat stem rust. Both the with and without scenarios account for climate change.", echo=FALSE} -->
+  <!-- #IMPACT 2020-2050 percentage change in yield, production, and area/animal numbers for key crops. -->
+  <!-- df_sup <- subset(df_overView, param %in% supplyParams & -->
+                          <!--                    Commodity %in% theseCommods) -->
+  <!-- df_sup <- df_sup %>% spread(Scenario, Val) -->
+  <!-- df_sup$`Best case` <- round(100 * (df_sup$`CC+WSR (best case)` - df_sup$`CC No WSR`) / df_sup$`CC No WSR`, 2) -->
+  <!-- df_sup$`Worst case` <- round(100 * (df_sup$`CC+WSR (worst case)` - df_sup$`CC No WSR`) / df_sup$`CC No WSR`, 2) -->
+  <!-- df_sup$`CC No WSR` <- NULL -->
+  <!-- df_sup$`CC+WSR (best case)` <- NULL -->
+  <!-- df_sup$`CC+WSR (worst case)` <- NULL -->
+  <!-- df_sup <- df_sup %>% gather(Scenario, `WSR-No WSR (Pct. difference)`, `Best case`:`Worst case`) -->
+  <!-- df_plot <- subset(df_sup, Year == 2035) -->
+  <!-- thisTitle <- "Wheat stem rust impact on yield, area harvested, and production, by region, 2035\n(Expressed as percentage difference, WSR - No WSR)" -->
+  <!-- gg <- ggplot(df_plot, aes(x = Commodity, -->
+                                   <!--                              y = Region, -->
+                                   <!--                              fill = `WSR-No WSR (Pct. difference)`, -->
+                                   <!--                              label = `WSR-No WSR (Pct. difference)`)) -->
+  <!-- gg <- gg + geom_tile() -->
+  <!-- gg <- gg + geom_text(size = cellText_size) -->
+  <!-- gg <- gg + scale_fill_gradient2(low = "magenta", -->
+                                         <!--                                 mid = "white", -->
+                                         <!--                                 high = "cyan", -->
+                                         <!--                                 midpoint = 0) -->
+  <!-- gg <- gg + facet_grid(Scenario~param) -->
+  <!-- gg <- gg + labs(title = thisTitle) -->
+  <!-- gg <- gg + theme_bw() -->
+  <!-- gg <- gg + theme(strip.background = element_rect(fill = "white"), -->
+                          <!--                  strip.text = element_text(size = facetTitle_size), -->
+                          <!--                  axis.title = element_blank(), -->
+                          <!--                  axis.text.y = element_text(size = axisText_size), -->
+                          <!--                  axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1), -->
+                          <!--                  legend.position = "top", -->
+                          <!--                  legend.text = element_text(size = legendText_size), -->
+                          <!--                  legend.title = element_text(size = legendText_size), -->
+                          <!--                  plot.title = element_text(size = title_size)) -->
+  <!-- gg <- gg + guides(fill = guide_colorbar(title.position="top", -->
+                                                 <!--                                         title.hjust = 0.5)) -->
+  <!-- gg_sup <- gg -->
+  <!-- gg -->
+  <!-- #========================================================================== -->
+  <!-- ``` -->
+  
+  <!-- #### Demand side impacts expressed in percentage terms -->
+  
+  <!-- # ```{r, fig.show='hold', fig.width=6, fig.height=6, fig.align='center', ft.align = "center", fig.cap="\\label{fig:demGraphicPct}Each number is the percentage difference between the value under the wheat stem rust scenario and the value under a scenario without wheat stem rust. Both scenarios account for climate change.", echo=FALSE} -->
+  <!-- df_dem <- subset(df_overView, param %in% demandParams & -->
+                          <!--                    Commodity %in% theseCommods) -->
+  <!-- df_dem$param[grep("HH", df_dem$param)] <- "HH Demand" -->
+  <!-- df_dem <- df_dem %>% group_by(Region, param, Commodity, Year, Scenario) %>% -->
+  <!--   summarise(Val = sum(Val, na.rm = T)) %>% as.data.frame() -->
+  <!-- #--- -->
+  <!-- df_dem <- df_dem %>% spread(Scenario, Val) -->
+  <!-- df_dem$`Best case` <- round(100 * (df_dem$`CC+WSR (best case)` - df_dem$`CC No WSR`) / df_dem$`CC No WSR`, 1) -->
+  <!-- df_dem$`Worst case` <- round(100 * (df_dem$`CC+WSR (worst case)` - df_dem$`CC No WSR`) / df_dem$`CC No WSR`, 1) -->
+  <!-- df_dem$`CC No WSR` <- NULL -->
+  <!-- df_dem$`CC+WSR (best case)` <- NULL -->
+  <!-- df_dem$`CC+WSR (worst case)` <- NULL -->
+  <!-- df_dem <- df_dem %>% gather(Scenario, `WSR-No WSR (Pct. difference)`, `Best case`:`Worst case`) -->
+  <!-- df_plot <- subset(df_dem, Year == 2035 & -->
+                           <!--                     param != "Intermediate Demand") -->
+  <!-- u <- df_plot$`WSR-No WSR (Pct. difference)` -->
+  <!-- df_plot$`WSR-No WSR (Pct. difference)`[which(is.nan(u))] <- 0 -->
+  <!-- thisTitle <- "Wheat stem rust impact on main demand categories, by region, 2035\n(Percentage difference, WSR - No WSR)" -->
+  <!-- gg <- ggplot(df_plot, aes(x = Commodity, -->
+                                   <!--                              y = Region, -->
+                                   <!--                              fill = `WSR-No WSR (Pct. difference)`, -->
+                                   <!--                              label = `WSR-No WSR (Pct. difference)`)) -->
+  <!-- gg <- gg + geom_tile() -->
+  <!-- gg <- gg + geom_text(size = cellText_size) -->
+  <!-- gg <- gg + scale_fill_gradient2(low = "magenta", -->
+                                         <!--                                 mid = "white", -->
+                                         <!--                                 high = "cyan", -->
+                                         <!--                                 midpoint = 0) -->
+  <!-- gg <- gg + facet_grid(Scenario~param) -->
+  <!-- #gg <- gg + facet_wrap(~Scenario) -->
+  <!-- gg <- gg + labs(title = thisTitle) -->
+  <!-- gg <- gg + theme_bw() -->
+  <!-- gg <- gg + theme(strip.background = element_rect(fill = "white"), -->
+                          <!--                  strip.text = element_text(size = facetTitle_size), -->
+                          <!--                  axis.title = element_blank(), -->
+                          <!--                  axis.text.y = element_text(size = axisText_size), -->
+                          <!--                  axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1), -->
+                          <!--                  plot.title = element_text(size = title_size), -->
+                          <!--                  legend.position = "top", -->
+                          <!--                  legend.text = element_text(size = legendText_size), -->
+                          <!--                  legend.title = element_text(size = legendText_size)) -->
+  <!-- gg <- gg + guides(fill = guide_colorbar(title.position="top", -->
+                                                 <!--                                         title.hjust = 0.5)) -->
+  <!-- gg_dem <- gg -->
+  <!-- gg -->
+  <!-- #======================================================================== -->
+  <!-- ``` -->
+  <!-- #### Food security impacts in percentage terms -->
+  <!-- # ```{r, fig.show='hold', fig.width=6, fig.height=6, fig.align='left', ft.align = "center", fig.cap="\\label{fig:foodSecPct}Each number is the percentage difference between the value with wheat stem rust and the value without wheat stem rust. Both scenarios account for climate change.", echo=FALSE} -->
+  <!-- these_params <- c("Pop at Risk of Hunger", "Undernourished Children") -->
+  <!-- df_foodSec <- subset(df_overView, param %in% these_params) -->
+  <!-- df_foodSec$Commodity <- NULL -->
+  <!-- #--- -->
+  <!-- these_yrs <- c(2035, 2050) -->
+  <!-- #--- -->
+  <!-- df_foodSec <- df_foodSec %>% spread(Scenario, Val) -->
+  <!-- df_foodSec$`Best case` <- round(100 * (df_foodSec$`CC+WSR (best case)` - df_foodSec$`CC No WSR`) / df_foodSec$`CC No WSR`, 2) -->
+  <!-- df_foodSec$`Worst case` <- round(100 * (df_foodSec$`CC+WSR (worst case)` - df_foodSec$`CC No WSR`) / df_foodSec$`CC No WSR`, 2) -->
+  <!-- df_foodSec$`CC No WSR` <- NULL -->
+  <!-- df_foodSec$`CC+WSR (best case)` <- NULL -->
+  <!-- df_foodSec$`CC+WSR (worst case)` <- NULL -->
+  <!-- df_add <- data.frame(Region = "N. America", param = "Undernourished Children",                      Year = these_yrs, -->
+                              <!--                      `Best case` = 0, -->
+                              <!--                      `Worst case` = 0) -->
+  <!-- colnames(df_add) <- gsub("\\.", " ", colnames(df_add)) -->
+  <!-- df_foodSec <- as.data.frame(rbind(df_foodSec, df_add)) -->
+  <!-- df_foodSec <- df_foodSec %>% gather(Scenario, `WSR-No WSR (Pct. difference)`, `Best case`:`Worst case`) -->
+  <!-- #--- -->
+  <!-- df_plot <- subset(df_foodSec, Year %in% these_yrs) -->
+  <!-- df_plot$Year <- as.character(df_plot$Year) -->
+  <!-- thisTitle <- "Wheat stem rust impact on food security indicators in 2035 and 2050\n(Percentage difference, WSR - No WSR)" -->
+  <!-- gg <- ggplot(df_plot, aes(x = Year, -->
+                                   <!--                              y = Region, -->
+                                   <!--                              fill = `WSR-No WSR (Pct. difference)`, -->
+                                   <!--                              label = `WSR-No WSR (Pct. difference)`)) -->
+  <!-- gg <- gg + geom_tile() -->
+  <!-- gg <- gg + geom_text(size = cellText_size) -->
+  <!-- gg <- gg + scale_fill_gradient2(low = "cyan", -->
+                                         <!--                                 mid = "white", -->
+                                         <!--                                 high = "magenta", -->
+                                         <!--                                 midpoint = 0) -->
+  <!-- gg <- gg + facet_grid(Scenario~param) -->
+  <!-- #gg <- gg + facet_wrap(~Scenario) -->
+  <!-- gg <- gg + labs(title = thisTitle) -->
+  <!-- gg <- gg + theme_bw() -->
+  <!-- gg <- gg + theme(strip.background = element_rect(fill = "white"), -->
+                          <!--                  strip.text = element_text(size = facetTitle_size), -->
+                          <!--                  axis.title = element_blank(), -->
+                          <!--                  axis.text.y = element_text(size = axisText_size), -->
+                          <!--                  axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1), -->
+                          <!--                  plot.title = element_text(size = title_size), -->
+                          <!--                  legend.position = "none")#, -->
+<!-- #                  legend.text = element_text(size = legendText_size), -->
+  <!-- #                  legend.title = element_text(size = legendText_size)) -->
+  <!-- # gg <- gg + guides(fill = guide_colorbar(title.position="top", -->
+  <!-- #                                         title.hjust = 0.5)) -->
+  <!-- gg -->
+  <!-- #======================================================================== -->
+  <!-- ``` -->
+  <!-- ## Climate models used in IMPACT -->
+  <!-- The economic analysis presented here uses the International Model for Policy Analysis of Agricultural Commodities and Trade (IMPACT), an exploratory tool for assessing linkages between agricultural policy, climate change, and technologies in agricultural systems. IMPACT is a global agricultural sector equilibrium model covering more than 50 commodities, with varying levels of fidelity. IMPACT is scenario-driven in that different assumptions regarding climate change, climate policy, economic growth, and population growth may be specified using different climate and socioeconomic scenarios. IMPACT does not account for perturbations resulting from the COVID-19 pandemic. -->
+  <!-- The socioeconomic basis of the results presented in this chapter is Shared Socioeconomic Pathway 3 (SSP3), a policy, population, and GDP trajectory  -->
+  <!-- "characterized by fast economic industrialization[,]... high levels of technological progress and improvements in education levels around the world". However, in this scenario, it is assumed that "the rapid industrialization is spurred on through the intense use of fossil fuels, and as such there is little effort to mitigate the effects of climate change"  -->
+  <!-- [@robinson2015international]. -->
+  <!-- Climate change in IMPACT is modeled using an ensemble of four climate models. Each of the climate models is fed the same set of assumptions regarding future carbon concentration and radiative forcing, which in turn drives future temperature increases. These assumptions are captured in different Representative Concentration Pathways (RCPs). For the present study, RCP 8.5 is assumed, which projects a mean global temperature rise of 1.4-2.6 degrees Celsius by 2050 over the 2005 level. See the IMPACT model documentation for further details [@robinson2015international]. -->
+  <!-- In IMPACT, yield is modeled as a function of both biophysical and economic factors. Yield gains due to ongoing improvements in germplasm and farm management are also taken into account. This means that yield loss due to climate change impacts on biophysical factors can be offset by technological improvements and economic incentives for farmers to invest more in inputs. Conversely, economic incentives can exacerbate biophysical yield loss, if price signals lead investments elsewhere. While climate change generally has an adverse biophysical impact on all agricultural commodities, these impacts are relatively more or less severe from one commodity to another, and from one country to another. These relative impacts then translate into a rebalancing of the comparative advantages (or disadvantages) of commodities with respect to one another, and of the comparative advantages of nations trading in these commodities. This rebalancing of comparative advantages, in turn, shapes the price signals driving changes in economic yield and planting decisions at the farm level in any given country. -->
+  <!-- The IMPACT analysis complements the biophysical analysis of climate change impacts on crop yields by accounting for the farmer's ability to adapt to the biophysical stress of climate change by altering input levels or switching to alternative crops. Ongoing improvements in technology and farm management, extrapolated from historical trends, are also taken into account. (More details regarding the IMPACT model are given in the Appendix.) -->
+<!-- ^[IMPACT does not account for perturbations resulting from the COVID-19 pandemic.] -->
+<!-- The four GCMs used to model climate are: -->
+<!-- + GFDL-ESM2M: Designed and maintained by the National Oceanic and Atmospheric Administration’s Geophysical Fluid Dynamic Laboratory (www.gfdl.noaa.gov/earth-system-model) -->
+<!-- + HADGEM2-ES: The Hadley Centre’s Global Environment Model, version 2 (www.metoffice.gov.uk/research/modelling-systems/unified-model/climate-models/hadgem2) -->
+<!-- + IPSL-CM5A-LR: The Institut Pierre Simon Laplace’s ESM (http://icmc.ipsl.fr/index.php/icmc-models/icmc-ipsl-cm5) -->
+<!-- + MIROC-ESM: Model for Interdisciplinary Research on Climate, developed by the University of Tokyo, National Institute for Environmental Studies, and Japan Agency for Marine-Earth Science and Technology (www.geosci-model-dev-discuss.net/4/1063/2011/gmdd-4-1063-2011.pdf) -->
+
+# Appendix
+
+## A more detailed description of the IMPACT model
+
+This is meant as a quick reference offering a more detailed, but not exhaustive, explanation of the IMPACT model than is offered in the main text. For the exhaustive treatment, see the model documentation [@robinson2015international].
+
+In IMPACT, assumptions regarding future climate change are captured in the assumed Representative Concentration Pathway (RCP). The chosen RCP determines future carbon concentration and radiative forcing, which in turn drives future temperature increases. For the present study, RCP 6.0 is assumed, which projects a mean global temperature rise of 0.8-1.8 degrees Celsius by 2050 over the 2005 level. Future climate is then modeled by feeding this RCP into the Hadley Centre’s Global Environment Model, version 2 (HADGEM2-ES). The climate is then downscaled to subnational spatial resolution and fed into crop models (DSSAT) to determine the biophysical yield.
+
+Economic yields are then calculated at the country level as a function of the biophysical yield, producer input and output prices, and an exogenous yield growth factor representing improvements in technology and management. The yield growth factor (or "intrinsic productivity growth rate") is extrapolated from the historical yield growth trend in corroboration with expert consultation, and may be interpreted as the status quo level of improvement, absent major positive or negative departures from the historical trend.
+
+Country level production of a given commodity is then calculated as the economic yield times the harvested area, where area is calculated as a function of commodity price, population growth, and land availability. Farmers are thus assumed to adjust both land allocation and economic yield in response to price signals. Domestic demand for agricultural commodities is calculated as a function of population and GDP, based on Engel's law. Given supply (domestic production + imports - exports) and demand, the multi-market agricultural sector equilibrium model in IMPACT then solves for the next year's market clearing commodity prices at both the domestic and international level. Starting yields and areas are taken from FAOSTAT.
+
+Because commodity demand and supply are partly functions of future population and GDP growth, assumptions regarding these exogenous trends must be specified before running IMPACT. In Integrated Assessment Modeling, such assumptions are typically bundled together in narratives called Shared Socioeconomic Pathways (SSP). In the present study, SSP2 is assumed. The model documentation describes this as "a middle of the road scenario that follows historical trends. Economic development continues but is not uniform. Environmental degradation continues but at a slowing pace.... Climate change presents moderate challenges to both adaptation and mitigation". For full details see Robinson et al. [-@robinson2015international].
+<!-- technology advancement, and intergovernmental action (or inaction) on climate change, -->
+<!-- SSP3 is assumed. This is a pessimistic scenario "characterized by increasing nationalism with greater levels of conflict and challenges to global and regional cooperation. Barriers to trade increase, and countries tend to look inward at the expense of global cooperation. There are lower levels of technological change. Economic development is slow, and population growth is higher. Climate change presents significant challenges for both adaptation and mitigation" -->
+<!-- RCP 8.5 is assumed, which projects a mean global temperature rise of 1.4-2.6 degrees Celsius by 2050 over the 2005 level -->
+<!-- (www.metoffice.gov.uk/research/modelling-systems/unified-model/climate-models/hadgem2) -->
+<!-- . These models are each fed the same set of assumptions regarding future carbon concentration and radiative forcing (i.e., the same RCP). The WSR best and worst case scenarios, as well as the No-WSR baseline scenario, were modeled using each of the four GCMs, generating 12 scenarios total. Results were then averaged over the GCMs, leaving the three scenarios examined in the analysis below (WSR best case, WSR worst case, and the No-WSR baseline). -->
+
+## Dynamic modeling of the spatial distribution of outbreaks
+
+<!-- --- -->
+<!--   title: "Draft of the spatial distribution of outbreaks model" -->
+<!-- author: "Benjamin Schiek" -->
+<!-- date: "`r Sys.Date()`" -->
+<!-- #bibliography: WSR IMPACT references.bib -->
+<!-- numbersections: true -->
+<!-- output: -->
+<!--   pdf_document: -->
+<!--   toc: false -->
+<!-- header-includes: -->
+<!--   - \usepackage{float} -->
+<!-- - \floatplacement{figure}{H} -->
+<!-- --- -->
+
+<!--   ```{r setup, include=FALSE} -->
+<!-- knitr::opts_chunk$set(echo = FALSE, -->
+<!--                       message = FALSE, -->
+<!--                       warning = FALSE) -->
+<!-- library(tidyverse) -->
+<!-- ``` -->
+
+Global, dynamic assessment of WSR impacts requires careful thought about when and where outbreaks occur. The experts consulted for this study indicated the likely outbreak frequency for a given country or region, but the spatial distribution of outbreaks at a given time remains to be determined. The spatial distribution of outbreaks at a given time is important because, as mentioned in the introduction, international market mechanisms can, to some extent, offset the food security impacts of outbreaks occurring in some regions but not in others. And, by the same token, this mitigating mechanism is rendered less effective as the number of regions where outbreaks occur at a given time increases. A scenario in which outbreaks occur everywhere at the same time may largely nullify the effectiveness of any offsetting market mechanisms.
+
+The null hypothesis---that the spatial distribution of outbreaks at any given time is random---may be rejected on the basis of the airborne spore dispersal studies cited in the literature review, which demonstrate a clear spatial correlation between outbreak regions with high connectivity. In other words, the incidence of outbreaks in a given region is influenced by the incidence of outbreaks in surrounding regions.
+
+To model the spatial distribution of outbreaks over time, we introduce an index $x_i(t)$ representing the $i^{th}$ region's wheat area vulnerable to WSR at time $t$, and consider the relation between $x_i(t)$ and the rate of vulnerability $d x_i / dt$ over time. We reason that the rate of vulnerability must slow as vulnerability increases, since increasing vulnerability calls forth the conditions that ultimately arrest and reverse the rate of vulnerability---for e.g., a dwindling host plant population (due to extermination via infection or to farms switching to alternative crops to avoid infection), and/or NAR plant pathologist response together with increased farm level awareness and protective countermeasures (spraying, planting of resistant varieties). Mathematically, this reasoning can be expressed
+
+\begin{equation}
+\frac{d^2 x_i}{dt^2} = - k_{ii} x_i(t)
+\end{equation}
+
+That is to say, in words, the slowing of the rate of vulnerability is proportionate to the level of vulnerability. Dimensional analysis reveals that the proportionality constant $k_{ii}$ has units of $\text{time}^{-2}$, and may be interpreted as a normalized measure of how quickly vulnerability translates into an outbreak within region $i$---and thus a measure of how quickly the conditions for arrest and reversal of vulnerability are reached.
+<!-- The higher the value of $k_{ii}$, the lower the threshold at which vulnerable area becomes infected area with yield loss. -->
+
+As documented in the spore dispersal studies, the vulnerability in neighboring regions must also be taken into account. We model the influence of vulnerability in a neighboring region $j \neq i$ on region $i$'s rate of vulnerability by adding the difference $x_j(t) - x_i(t)$ times $-k_{ij}$, where $k_{ij}$ is a constant quantifying the ease of airborne spore transmission between the two regions.
+
+\begin{equation}
+\frac{d^2 x_i}{dt^2} = - (k_{ii} x_i(t) + \sum_{j \neq i} k_{ij} (x_j(t) - x_i(t)))
+\label{eq:assump}
+\end{equation}
+
+Regions $i$ and $j$ are defined as neighbors if $k_{ij} \neq 0$. The modified equation says that if neighboring region $j$'s vulnerability is greater than region $i$'s vulnerability ($x_j(t) > x_i(t)$), then region $j$'s vulnerability aggravates region $i$'s vulnerability, which adds an additional brake on its rate of vulnerability. Conversely, if $x_j(t) < x_i(t)$, then neighboring region $j$'s vulnerability alleviates region $i$'s vulnerability, thereby offsetting the brake on $dx_i/dt$. In matrix form, 
+
+\begin{equation}
+\frac{d^2 \mathbf{x}}{dt^2} + K \mathbf{x}(t) = \mathbf{0}
+\label{eq:hOsc0}
+\end{equation}
+
+Where the off-diagonal elements of $K$ are $k_{ij}$, the diagonal elements are $\sum_j k_{ij}$, and $\mathbf{0}$ is a vector of zeros. Now, note that the vector $\mathbf{x}(t)$ may be expressed as a linear combination of orthonormal basis vectors,
+
+\begin{equation}
+\mathbf{x}(t) = U \mathbf{c}(t)
+\label{eq:xtOrth}
+\end{equation}
+
+Such that the previous equation can be rewritten
+
+\begin{equation}
+U \frac{d^2 \mathbf{c}}{dt^2} + K U \mathbf{c}(t) = \mathbf{0}
+\end{equation}
+
+And the coordinates $\mathbf{c}(t)$ can then be found by premultiplying through by the transpose of $U$.
+
+\begin{equation}
+\begin{split}
+U' U \frac{d^2 \mathbf{c}}{dt^2} + U' K U \mathbf{c}(t) &= \mathbf{0} \\
+\frac{d^2 \mathbf{c}}{dt^2} + U' K U \mathbf{c}(t) &= \mathbf{0}
+\end{split}
+\end{equation}
+
+The basis $U$ may be any set of orthonormal vectors. To solve for $\mathbf{c}(t)$, it is expedient to focus on the case where $U$ equals the normalized eigenvectors of $K$, such that this equation further reduces to
+
+\begin{equation}
+\frac{d^2 \mathbf{c}}{dt^2} + \Lambda \mathbf{c}(t) = \mathbf{0}
+\end{equation}
+
+Where $\Lambda$ is the diagonal matrix of eigenvalues of $K$. This is well known in physics and engineering contexts as the harmonic oscillator equation, with unique solution
+
+\begin{equation}
+c_i(t) = c_i(0) \cos(\omega_i t) + \frac{1}{\omega_i} \frac{d c_i}{dt} \Bigr|_{t = 0} \sin(\omega_i t)
+\label{eq:hOsc1}
+\end{equation}
+
+Where the frequencies $\omega_i$ equal the square root of the eigenvalues of $K$ (denoted $\lambda_i$).
+
+\begin{equation}
+\omega_i = \sqrt{\lambda_i}
+\end{equation}
+
+See Meirovitch [-@meirovitch2001fundVibs] for details. The correspondence between $\omega_i$ and $\lambda_i$ is perhaps easier to discern if Equation \ref{eq:hOsc1} is substituted into Equation \ref{eq:hOsc0}, giving
+
+\begin{equation}
+\begin{split}
+-\Omega^2 U \mathbf{c}(t) + K U \mathbf{c}(t) &= \mathbf{0} \\
+\Rightarrow \: (K - \Omega^2) U \mathbf{c}(t) &= \mathbf{0}
+\end{split}
+\end{equation}
+
+(Where $\Omega$ is the diagonal matrix of frequencies $\omega_i$ and $\mathbf{0}$ is a vector of zeros.)
+
+The spatial distribution of regional vulnerabilities at any given time ($\mathbf{x}(t)$) may thus be calculated by substituting Equation \ref{eq:hOsc1} into Equation \ref{eq:xtOrth}. Note that, given the functional form derived in Equation \ref{eq:hOsc1}, the $x_i(t)$ periodically take negative values. Negative WSR vulnerability may be interpreted as WSR resistance.
+<!-- and is subject to the same assumption formalized in Equation \ref{eq:assump}. -->
+
+For the present purpose of modeling a plausible spatial distribution of outbreaks over time, the precise value of a given $x_i(t)$ is unimportant. We assume an outbreak occurs in a given region when $x_i(t)$ reaches a maximum. The regional spore transmission network is displayed in Figure \ref{fig:RegNet}, together with the transmission coefficient values and citations of the supporting literature. The own transmission coefficients ($k_{ii}$) are assigned values reflecting the anticipated outbreak frequencies in Table 1.
+
+Assigning values for the transmission coefficients between regions (the $k_{ij}$ where $i \neq j$) is a considerably less straightforward task. We aim for order of magnitude accuracy based on qualitative assessments gathered from the literature. At a more disaggregate level, the work by Radici et al. [-@radici2022early] classifies transmission routes as "common", "occasional", and "rare" in the northern hemisphere. Taking this as a rough guide, we assign values of 0.01 and 0.001, corresponding to "occasional" and "rare", respectively (no instances of "common" occur at the more aggregate network considered here). The transmission route connecting Africa South of the Sahara with West Asia & North Africa is assigned a value of 0.01 based on the assessment by Meyer et al. [-@meyer2017quantifying]. In the southern hemisphere, the literature generally characterizes successful transoceanic spore transport as infrequent [@nagarajan1990long; @visser2019microsatellite; @prank2019climate]; and so we assign 0.001 to these routes. Coefficients $k_{ij}$ not displayed in Figure \ref{fig:RegNet} are set to zero.
+
+```{r, fig.show='hold', fig.width=7, fig.height=6, fig.align='center', ft.align = "center", fig.cap="\\label{fig:RegNet}Outbreak network.", echo=FALSE}
+
+knitr::include_graphics("spore pathways 800x600.png")
+
+```
+South Asia is excluded from the spore transmission network based on the expert consultation summarized in the previous section, which indicates high confidence in the region's resilience to WSR outbreaks for the foreseeable future. We note that this assessment is corroborated by Meyer et al. [-@meyer2017quantifying], who find "rare to infrequent" direct spore transmission from West Asia (Iran) to South Asia, as well as "infrequent" direct transmission from Eastern Yemen across the Arabian Sea, and "frequent to very frequent" indirect transmission via Central Asia (Afghanistan)---but with a very small infection time window due to differences in cropping seasons.
+
+Finally,...initial values $\mathbf{c}(0)$ and $d \mathbf{c}(0) / dt$...
+
+Based on this parameterization of $K$, the region WSR vulnerabilities are calculated over a 25 year time horizon corresponding to the years 2025 to 2050, and presented in Figure \ref{fig:spatDist}.
+
+```{r, fig.show='hold', fig.width=6, fig.height=5, fig.align='center', ft.align = "center", fig.cap="\\label{fig:spatDist}Spatial distribution of wheat stem rust outbreaks over time. Outbreaks are assumed to occur at the peaks of vulnerability.", echo=FALSE}
+
+# Own
+kSSA <- 1 # * mSSA
+kSAm <- 0.1 # * mSAm
+kAUS <- 0.01 # * mAUS
+kWANA <- 0.1 # * mWANA
+kRCA <- 0.01 # * mRCA
+kEUR <- 0.01 # * mEUR
+kNAM <- 0.01 # * mNAM
+kEA <- 0.01 # * mEA
+# Cross
+kSSAsam <- 0.001 # * sqrt(mSSA * mSAm)
+kSSAaus <- 0.001 # * sqrt(mSSA * mAUS)
+kSSAwana <- 0.01 # * sqrt(mSSA * mWANA)
+kWANArca <- 0.01 # * sqrt(mWANA * mRCA)
+kWANAeur <- 0.01 # * sqrt(mWANA * mEUR)
+kRCAeur <- 0.01 # * sqrt(mRCA * mEUR)
+kRCAea <- 0.01 # * sqrt(mRCA * mEA)
+kEURnam <- 0.001 # * sqrt(mEUR * mNAM)
+# Put own and cross influence into rows for each region
+Krow1_ssa <- c(kSSA, kSSAsam, kSSAaus, kSSAwana, 0, 0, 0, 0)
+Krow2_sam <- c(kSSAsam, kSAm, 0, 0, 0, 0, 0, 0)
+Krow3_aus <- c(kSSAaus, 0, kAUS, 0, 0, 0, 0, 0)
+Krow4_wan <- c(kSSAwana, 0, 0, kWANA, kWANArca, kWANAeur, 0, 0)
+Krow5_rca <- c(0, 0, 0, kWANArca, kRCA, kRCAeur, kRCAea, 0)
+Krow6_eur <- c(0, 0, 0, kWANAeur, kRCAeur, kEUR, 0, kEURnam)
+Krow7_eas <- c(0, 0, 0, 0, kRCAea, 0, kEA, 0)
+Krow8_nam <- c(0, 0, 0, 0, 0, kEURnam, 0, kNAM)
+listRows <- list(Krow1_ssa, Krow2_sam, Krow3_aus, Krow4_wan,
+                 Krow5_rca, Krow6_eur, Krow7_eas, Krow8_nam)
+K <- do.call(rbind, listRows)
+Kmod <- K
+diag(Kmod) <- rowSums(K)
+#M <- diag(rep(1, n))
+regOrder <- c("Africa South\nof the Sahara", "South America", "Australia", "West Asia &\nNorth Africa", "Russia &\nCentral Asia", "Europe", "East Asia", "North America")
+#eigOut <- eigen(solve(M) %*% Kmod)
+#eigOut <- eigen(Gmod)
+eigOut <- eigen(Kmod)
+eigVals <- eigOut$values
+eigVecs <- eigOut$vectors
+resFreqs <- sqrt(eigVals)
+#----------------------------------------------------------------
+# Note eigVecs are not orthogonal but are Kmod and M orthogonal
+# t(eigVecs) %*% Kmod %*% eigVecs
+# t(eigVecs) %*% M %*% eigVecs
+#---------------------------------------------------------------
+U <- eigVecs
+#------------------
+# # Initial values
+# dLnfdt0 <- 1/2
+# f0 <- 1/2
+# #------------------
+# Derive max amplitude and phase shift parameters based on initial values
+# Cvec <- f0 * sqrt(1 + 1 / resFreqs^2 * dLnfdt0^2)
+# phiVec <- -atan(-1 / resFreqs * dLnfdt0)
+n <- length(resFreqs)
+# c0 <- t(U) %*% rnorm(n)
+# cDot0 <- t(U) %*% rnorm(n)
+c0 <- c(1.6574469, -0.6223231, 0.4870719, -0.6398373, -0.4606594, 0.4334534, -0.7370816, -0.5185418)
+# cDot0 <- rep(0, n)
+cDot0 <- c(-0.18966722, 0.93685226, 1.47569166, -1.17947652, 0.85290798, 1.05887843, 0.06238909, -0.19244532)
+#------------------
+lenT <- 300
+th <- 25 #time horizon in years, 1 year = 2 pi
+tVec <- seq(0, th * 2 * pi, length.out = lenT)
+list_qVec <- list()
+for(t in 1:lenT){
+  #fVec <- Cvec * cos(resFreqs * tVec[t] - phiVec)
+  fVec <- c0 * cos(resFreqs * tVec[t]) + cDot0 * sin(resFreqs * tVec[t])
+  qVec <- U %*% fVec
+  list_qVec[[t]] <- t(qVec)
+}
+
+df <- as.data.frame(do.call(rbind, list_qVec))
+#colnames(df) <- c("EAfr", "CWANA", "EUR", "NAM")
+#regionVec <- c("SSA", "WANA", "EUR", "RCA", "NAM", "EAP")
+colnames(df) <- regOrder
+gatherCols <- colnames(df)
+# spec <- spec.ar(df$SSA)
+# periodEAfr <- 1 / spec$freq[which.max(spec$spec)]
+# matPeaks <- pracma::findpeaks(df$SSA)
+# indLows <- matPeaks[, 4]
+# #mean(diff(indLows))
+# tPerVec <- tVec[indLows[-1]] - tVec[indLows[-length(indLows)]]
+# tPerVec <- tPerVec[-length(tPerVec)]
+# fctr <- max(tPerVec)
+# yrVec <- tVec * fctr / pi
+yrVec <- tVec / (2 * pi)
+
+df$Year <- 2025 + yrVec
+df <- df %>% gather_("Region", "Vulnerability", gatherCols)
+# gg <- ggplot(df, aes(x = Year, y = `Outbreak amplitude`, group = Region, color = Region))
+# #gg <- gg + geom_hline(yintercept = 0)
+# gg <- gg + geom_vline(xintercept = 0)
+# gg <- gg + geom_line()
+# gg <- gg + coord_cartesian(xlim = c(2024, 2050))
+# gg <- gg + theme_bw()
+# gg <- gg + theme(legend.position = "top",
+#                  axis.text.y = element_blank(),
+#                  axis.ticks.y = element_blank())
+# gg
+
+#df$Year <- as.Date(as.character(df$Year), "%Y")
+gg <- ggplot(df, aes(x = Year, y = Vulnerability))
+gg <- gg + geom_line()
+#gg <- gg + geom_hline(yintercept = 0)
+#gg <- gg + scale_x_continuous(breaks = 5)
+# gg <- gg + scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+# gg <- gg + scale_x_date(breaks = scales::breaks_pretty(n = 8), labels = scales::date_format("%Y"))
+gg <- gg + facet_wrap(~Region)
+gg <- gg + coord_cartesian(xlim = c(2024, 2050))
+gg <- gg + theme_bw()
+gg <- gg + theme(axis.text.y = element_blank(),
+                 axis.ticks.y = element_blank())
+gg
+
+
+```
+
+
+
+
+# References {-}
+<!-- <div id="refs"></div> -->
+<!-- \pagebreak -->
+
+<!-- --- -->
+<!-- title: Short Paper -->
+<!-- author: -->
+<!--   - name: Alice Anonymous -->
+<!--     email: alice@example.com -->
+<!--     affiliation: Some Institute of Technology -->
+<!--     correspondingauthor: true -->
+<!--     footnote: 1 -->
+<!--   - name: Bob Security -->
+<!--     email: bob@example.com -->
+<!--     affiliation: Another University -->
+<!--   - name: Cat Memes -->
+<!--     email: cat@example.com -->
+<!--     affiliation: Another University -->
+<!--     footnote: 2 -->
+<!--   - name: Derek Zoolander -->
+<!--     email: derek@example.com -->
+<!--     affiliation: Some Institute of Technology -->
+<!--     footnote: 2 -->
+<!-- address: -->
+<!--   - code: Some Institute of Technology -->
+<!--     address: Department, Street, City, State, Zip -->
+<!--   - code: Another University -->
+<!--     address: Department, Street, City, State, Zip -->
+<!-- footnote: -->
+<!--   - code: 1 -->
+<!--     text: "This is the first author footnote." -->
+<!--   - code: 2 -->
+<!--     text: "Another author footnote." -->
+<!-- abstract: | -->
+<!--   This is the abstract. -->
+
+<!--   It consists of two paragraphs. -->
+<!-- keywords:  -->
+<!--   - keyword1 -->
+<!--   - keyword2 -->
+<!-- journal: "An awesome journal" -->
+<!-- date: "`r Sys.Date()`" -->
+<!-- classoption: preprint, 3p, authoryear -->
+<!-- bibliography: mybibfile.bib -->
+<!-- linenumbers: false -->
+<!-- numbersections: true -->
+<!-- # Use a CSL with `citation_package = "default"` -->
+<!-- # csl: https://www.zotero.org/styles/elsevier-harvard -->
+<!-- output:  -->
+<!--   rticles::elsevier_article: -->
+<!--     keep_tex: true -->
+<!--     citation_package: natbib -->
+<!-- --- -->
