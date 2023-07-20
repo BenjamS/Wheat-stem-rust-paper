@@ -154,7 +154,7 @@ K <- do.call(rbind, listRows)
 Kmod <- K
 diag(Kmod) <- rowSums(K)
 #M <- diag(rep(1, n))
-regOrder <- c("Africa South\nof the Sahara", "South America", "Australia", "West Asia &\nNorth Africa", "Russia &\nCentral Asia", "Europe", "East Asia", "North America")
+regOrder <- c("Africa South of the Sahara", "South America", "Australia", "West Asia & North Africa", "Russia & Central Asia", "Europe", "East Asia", "North America")
 #eigOut <- eigen(solve(M) %*% Kmod)
 #eigOut <- eigen(Gmod)
 eigOut <- eigen(Kmod)
