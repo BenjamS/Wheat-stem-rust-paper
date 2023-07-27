@@ -1,0 +1,408 @@
+library(tidyverse)
+#=============================================================================
+supplyParams <- c("QSXAgg -- Total Production",
+                  "TAreaXAgg -- Total Area",
+                  "TYldXAgg -- Total Yield",
+                  "AnmlNumXAgg -- Animal Numbers",
+                  "AnmlYldXAgg -- Animal Yield",
+                  "QMXAgg -- Import",
+                  "PPXAgg -- Producer Prices",
+                  "PCXAgg -- Consumer Prices",
+                  "PEXAgg -- Export Prices",
+                  "PWXAgg -- World Prices")
+
+demandParams <- c("QHDXAgg -- Household Demand",
+                  "QEXAgg -- Export",
+                  "QLXAgg -- Livestock\nFeed Demand",
+                  "QINTXAgg -- Intermediate Demand",
+                  "QOTHRXAgg -- Other Demand",
+                  "QDXAgg -- Total Demand")
+
+foodAvailParams <- c("PerCapKCalXAgg",
+                     "PerCapKCalCXAgg -- PcKcal by Commodity",
+                     "PopulationAtRiskXagg - Pop at Risk of Hunger",
+                     "ShareAtRiskXagg -- Share at Risk of Hunger",
+                     "TotalMalnourishedXagg -- Malnurished Children",
+                     "QMSHXAgg -- Import Share of Demand",
+                     "PopXAgg -- Population")
+
+# supply_params <- c("Area",
+#                    "Production",
+#                    "Yield",
+#                    "Animal Numbers",
+#                    "Animal Yield")
+
+# demand_params <- c("Household Demand",
+#                    "Export",
+#                    "Livestock\nFeed Demand",
+#                    "Intermediate Demand",
+#                    "Other Demand")
+# foodSec_params <- c("Availability\n(kcal/capita/day)",
+#                     "Share at Risk of Hunger",
+#                     "undernourished Children",
+#                     "Import Share of Demand")
+
+paramVec <- c(supplyParams,
+              demandParams,
+              foodAvailParams)
+
+
+commodVec <- c("CER-Wheat",
+               "CER-Maize",
+               "CER-Millet",
+               "CER-Rice",
+               "CER-Barley",
+               "CER-Sorghum",
+               "CER-Other Cereals")
+
+commodVec_overView <- c("CER-Wheat",
+                        "CER",
+                        "R&T",
+                        "PUL",
+                        "OLS")
+
+forTotKcalPcap <- c("CER", "OLS", "AllA", "R&T",
+                    "F&V", "PUL", "SGR")
+#regionVec <- c("SSA", "EUR", "LAC", "NAM", "MEN", "EAP", "SAS", "FSU", "WLD")
+this_commodVec <- unique(c(commodVec, forTotKcalPcap, "-"))
+#=================================================================
+# Import raw IMPACT output file (generated using ReportGen.xlsx)
+#-----------------------------------------------------------------
+this_folder <- "E:/BSCHIEK/"
+# this_subfolder <- "2Blades WSR IMPACT/New run/"
+this_subfolder <- "IMPACT3-Model-ver3.3/OutputFiles/Aggregation/"
+this_fileName <- "WSR2_ssp2_rcp45.csv"
+this_filePath <- paste0(this_folder, this_subfolder, this_fileName)
+df_raw <- read.csv(this_filePath, stringsAsFactors = F)
+this_df <- subset(df_raw, impactparameter %in% paramVec &
+                    commodity %in% this_commodVec &
+                    year >= 2024)
+#=================================================================
+# Process the IMPACT file
+#-----------------------------------------------------------------
+# HH demand
+# Let's use "QHDXAgg -- Household Demand", which is disggregated by commodity
+# It is also disaggregated by rural and urban, which Tim says is experimental
+# So have to make sure and use the total HH
+# The alternative param "QFXAgg -- Household Demand" is aggregated to country level
+# which does not allow examination of HH demand for specific commodities
+this_df <- subset(this_df, impactparameter != "QFXAgg -- Household Demand")
+# Aggregate rural and urban HH demand
+df_hh <- subset(this_df, impactparameter == "QHDXAgg -- Household Demand")
+this_df <- subset(this_df, impactparameter != "QHDXAgg -- Household Demand")
+df_hh <- df_hh %>% group_by(impactparameter, scenario, commodity,
+                            region, year) %>% summarize(Val = sum(Val))
+df_hh$productiontype <- "total"
+this_df <- as.data.frame(rbind(this_df, df_hh[, colnames(this_df)]))
+# Don't need productiontype column anymore
+this_df$productiontype <- NULL
+#--------------------------------------------------------------
+# Fix parameter names
+# Get rid of the weird prefix
+this_df$impactparameter <- gsub("^.*\\-- ", "", this_df$impactparameter)
+# Get rid of "Total" before "Total Yield", "Total Area", "Total Production"
+# ("Total" just means that we are talking about both irrigated and rainfed)
+# But keep "Total" for "Total Demand"
+indRmTotal <- which(this_df$impactparameter %in% c("Total Yield", "Total Area", "Total Production"))
+this_df$impactparameter[indRmTotal] <- gsub("Total ", "", this_df$impactparameter[indRmTotal])
+# Fix "PopulationAtRiskXagg - Pop at Risk of Hunger"
+this_df$impactparameter <- gsub("PopulationAtRiskXagg - ", "", this_df$impactparameter)
+# Fix "PerCapKCalXAgg" (total kcal per capita per day)
+this_df$impactparameter[grep("PerCapKCalXAgg", this_df$impactparameter)] <- "Total Availability\n(kcal/capita/day)"
+# Fix "PcKcal by Commodity" (kcal per capita per day by commodity)
+this_df$impactparameter[grep("PcKcal by Commodity", this_df$impactparameter)] <- "Availability\n(kcal/capita/day)"
+# Fix "Malnurished children"
+this_df$impactparameter <- gsub("Malnurished", "Undernourished", this_df$impactparameter)
+#--------------------------------------------------------------
+# Fix geography
+# Separate country and region columns
+this_df$Region <- gsub("\\-.*", "", this_df$region)
+this_df$Country <- gsub("^.*\\-", "", this_df$region)
+this_df$region <- NULL
+# Rename regions
+this_df$Region[which(this_df$Region == "SSA")] <- "Africa South\nof the Sahara"
+this_df$Region[which(this_df$Region == "SAS")] <- "South Asia"
+this_df$Region[which(this_df$Region == "NAM")] <- "N. America"
+this_df$Region[which(this_df$Region == "MEN")] <- "West Asia &\nNorth Africa"
+this_df$Region[which(this_df$Region == "LAC")] <- "Latin America\n& Caribbean"
+this_df$Region[which(this_df$Region == "FSU")] <- "Russia &\nCentral Asia"
+this_df$Region[which(this_df$Region == "EUR")] <- "Europe"
+this_df$Region[which(this_df$Region == "EAP")] <- "East Asia &\nPacific"
+this_df$Region[which(this_df$Region == "WLD")] <- "World"
+# Fine tune region groupings
+# Move Ukraine and Belarus from FSU to Europe
+this_df$Region[which(this_df$Country == "Ukraine")] <- "Europe"
+this_df$Region[which(this_df$Country == "Belarus")] <- "Europe"
+# Move Afghanistan from South Asia to Central Asia
+this_df$Region[which(this_df$Country == "Afghanistan")] <- "Russia & Central Asia"
+# Move Iran from West Asia to Central Asia
+this_df$Region[which(this_df$Country == "Iran")] <- "Russia & Central Asia"
+# Drop Greenland, DVD, EAS, and DVG
+this_df <- subset(this_df, !(Country %in% c("Greenland", "DVD", "DVG", "EAS")))
+# Get rid of default regional aggregates
+dropVec <- c("SSA", "EUR", "LAC", "NAM", "MEN", "EAP", "SAS", "FSU", "WLD")
+this_df <- subset(this_df, !(Country %in% dropVec))
+#--------------------------------------------------------------
+# Now have to reaggregate all parameters up to the newly defined regions
+# For some params this is simple, others not so much
+#---
+# First the easy part - params at commodity level
+aggVec1 <- c("Total Demand", "Other Demand",
+             "Production", "Area", "Animal Numbers",
+             "Availability\n(kcal/capita/day)",
+             "Intermediate Demand",
+             "Export", "Import", "Household Demand")
+dfAgg1 <- subset(this_df, impactparameter %in% aggVec1)
+dfAgg1 <- dfAgg1 %>% group_by(impactparameter, scenario,
+                              commodity,
+                              year, Region) %>%
+  summarize(Val = sum(Val))
+# Recalculate yields from crops and animals
+# First crops
+dfAggYd <- subset(dfAgg1, impactparameter %in% c("Area", "Production") &
+                    commodity != "AllA")
+dfAggYd <- dfAggYd %>% spread(impactparameter, Val)
+dfAggYd$Yield <- dfAggYd$Production / dfAggYd$Area
+dfAggYd$Area <- NULL; dfAggYd$Production <- NULL
+colnames(dfAggYd)[ncol(dfAggYd)] <- "Val"
+dfAggYd$impactparameter <- "Yield"
+dfAggYd <- dfAggYd[, colnames(dfAgg1)]
+# Then animals
+dfAggAnimYd <- subset(dfAgg1, impactparameter %in% c("Animal Numbers", "Production") &
+                        commodity == "AllA")
+dfAggAnimYd <- dfAggAnimYd %>% spread(impactparameter, Val)
+dfAggAnimYd$`Animal Yield` <- dfAggAnimYd$Production / dfAggAnimYd$`Animal Numbers`
+dfAggAnimYd$Area <- NULL; dfAggAnimYd$Production <- NULL
+colnames(dfAggAnimYd)[ncol(dfAggAnimYd)] <- "Val"
+dfAggAnimYd$impactparameter <- "Yield"
+dfAggAnimYd <- dfAggAnimYd[, colnames(dfAgg1)]
+# Recalculate Import Share of Demand
+dfAggISofD <- dfAgg1 %>% subset(impactparameter %in% c("Import",
+                                                       "Total Demand")) %>%
+  spread(impactparameter, Val) %>% as.data.frame()
+dfAggISofD$`Import Share of Demand` <- dfAggISofD$Import / dfAggISofD$`Total Demand`
+dfAggISofD$`Total Demand` <- NULL; dfAggISofD$Import <- NULL
+colnames(dfAggISofD)[ncol(dfAggISofD)] <- "Val"
+dfAggISofD$impactparameter <- "Import Share of Demand"
+dfAggISofD <- dfAggISofD[, colnames(dfAgg1)]
+# Put it together
+dfAgg1 <- as.data.frame(do.call(rbind, list(dfAgg1, dfAggYd, dfAggAnimYd, dfAggISofD)))
+rm(dfAggYd, dfAggAnimYd, dfAggISofD)
+#---
+# Now the harder part - params at country level, prices
+aggVec2 <- setdiff(unique(this_df$impactparameter), aggVec1)
+# Drop yield and import share of demand params as these were just calculated above
+aggVec2 <- aggVec2[-grep("Yield|Import Share of Demand", aggVec2)]
+# Drop share at risk of hunger as this will now be recalculated
+aggVec2 <- aggVec2[-grep("Share at Risk of Hunger", aggVec2)]
+dfAgg2 <- subset(this_df, impactparameter %in% aggVec2)
+# Separate params that have to be summed from params that have to be averaged
+# (The prices are the ones that have to be averaged)
+priceParams <- c("Consumer Prices",
+                 "Export Prices",
+                 "Producer Prices",
+                 "World Prices")
+dfAggPrice <- subset(dfAgg2, impactparameter %in% priceParams)
+dfAggPrice <- dfAggPrice %>% group_by(impactparameter, scenario,
+                                      commodity, year, Region) %>%
+  summarize(Val = mean(Val)) %>% as.data.frame()
+# Now the sums from country to region level
+dfAgg2 <- dfAgg2 %>% subset(impactparameter %in% setdiff(aggVec2, priceParams)) %>%
+  group_by(impactparameter, scenario, commodity, year, Region) %>%
+  summarize(Val = sum(Val)) %>% as.data.frame()
+# Recalculate Share at Risk of Hunger
+dfPaRofH <- dfAgg2 %>% subset(impactparameter %in% c("Population",
+                                                     "Pop at Risk of Hunger")) %>%
+  spread(impactparameter, Val) %>% as.data.frame()
+dfPaRofH$`Share at Risk of Hunger` <- dfPaRofH$`Pop at Risk of Hunger` / dfPaRofH$Population
+dfPaRofH$`Pop at Risk of Hunger` <- NULL; dfPaRofH$Population <- NULL
+colnames(dfPaRofH)[ncol(dfPaRofH)] <- "Val"
+dfPaRofH$impactparameter <- "Share at Risk of Hunger"
+dfPaRofH <- dfPaRofH[, colnames(dfAgg2)]
+# Put it together
+dfAgg2 <- as.data.frame(do.call(rbind, list(dfAgg2, dfAggPrice, dfPaRofH)))
+rm(dfAggPrice, dfPaRofH)
+# Put back together the commodity level and country level dfs
+# Now everything is at region level
+this_df <- as.data.frame(rbind(dfAgg1, dfAgg2))
+#--------------------------------------------------------------
+#...
+
+# Create "other cereals" commodity
+if("CER" %in% this_commodVec){
+  these_CERs <- this_commodVec[grep("CER", this_commodVec)]
+  this_dfCER <- subset(this_df, commodity %in% these_CERs)
+  this_df <- subset(this_df, !(commodity %in% these_CERs))
+  this_dfCER <- this_dfCER %>% spread(commodity, Val)
+  these_cols <- which(colnames(this_dfCER) != "CER")
+  these_cols <- these_cols[these_cols > 6]
+  if(length(these_cols) > 1){
+    this_dfCER$`Other cereals` <- this_dfCER$CER - rowSums(this_dfCER[, these_cols])
+  }else{
+    this_dfCER$`Other cereals` <- this_dfCER$CER - this_dfCER[, these_cols]
+  }
+  this_dfCER$CER <- NULL
+  
+  gathercols <- colnames(this_dfCER)[6:ncol(this_dfCER)]
+  this_dfCER <- this_dfCER %>% gather_("commodity", "Val", gathercols)
+  this_dfCER <- this_dfCER[, colnames(this_df)]
+  
+  ind_otherCer <- which(this_dfCER$commodity == "Other cereals")
+  ind_yd <- which(this_dfCER$impactparameter == "Yield")
+  ind_rm <- intersect(ind_otherCer, ind_yd)
+  this_dfCER <- this_dfCER[-ind_rm, ]
+  
+  this_dfotherCERYd <- subset(this_dfCER, impactparameter %in% c("Area", "Production") & commodity == "Other cereals")
+  #this_dfCER <- subset(this_dfCER, impactparameter != "Yield")
+  this_dfotherCERYd$productiontype <- NULL
+  this_dfotherCERYd <- this_dfotherCERYd %>% spread(impactparameter, Val)
+  this_dfotherCERYd$Val <- this_dfotherCERYd$Production / this_dfotherCERYd$Area
+  this_dfotherCERYd$productiontype <- "total"
+  this_dfotherCERYd$impactparameter <- "Yield"
+  this_dfotherCERYd <- this_dfotherCERYd[, colnames(this_dfCER)]
+  this_dfCER <- rbind(this_dfCER, this_dfotherCERYd)
+  
+  
+}
+#---
+# Unite new vars with data
+if("CER" %in% this_commodVec){
+  list_df <- list(this_df, this_dfCER)
+}else{
+  #list_df <- list(this_df, this_dfKcal)
+}
+#this_df <- as.data.frame(do.call(rbind, list_df))
+#---
+# Commodity names
+this_df$commodity <- gsub("^.*\\-", "", this_df$commodity)
+# Relabel commodities
+u <- this_df$commodity
+this_df$commodity[grep("SGR", u)] <- "Sugar"
+this_df$commodity[grep("AllA", u)] <- "Animal products"
+#this_df$commodity[grep("CER", u)] <- "Cereals"
+this_df$commodity[grep("R&T", u)] <- "Roots & tubers"
+this_df$commodity[grep("OLS", u)] <- "Oilseeds"
+this_df$commodity[grep("OIL", u)] <- "Vegetable oils"
+this_df$commodity[grep("PUL", u)] <- "Pulses"
+this_df$commodity[grep("F&V", u)] <- "Fruits &\nvegetables"
+this_df$commodity[grep("Lamb", u)] <- "Small\nruminants"
+#---
+# Create SSP, RCP, and GCM variables
+#this_df$SSP <- paste("SSP", i)
+#this_df$RCP <- NA
+# this_df$RCP[grep("4.5", this_df$Scenario)] <- "RCP 4.5"
+# this_df$RCP[grep("8.5", this_df$Scenario)] <- "RCP 8.5"
+# this_df$RCP[grep("NoCC", this_df$Scenario)] <- "NoCC"
+# this_df$GCM <- gsub("\\_.*", "", this_df$Scenario)
+
+this_df$productiontype <- NULL
+
+this_df$scenario[grep("NoWSR", this_df$scenario)] <- "CC No WSR"
+#this_df$scenario[grep("WSRwrst", this_df$scenario)] <- "CC+WSR (worst case)"
+this_df$scenario[grep("wrst", this_df$scenario)] <- "CC+WSR (worst case)"
+this_df$year <- as.integer(this_df$year)
+this_dfCC <- subset(this_df, scenario == "CC No WSR")
+this_dfCCWSRwrst <- subset(this_df, scenario == "CC+WSR (worst case)")
+this_dfCCWSRbest <- subset(this_df, !(scenario %in% c("CC",
+                                                      "CC+WSR (worst case)")))
+this_dfCCWSRbest$scenario <- "CC+WSR (best case)"
+# This is throwing a weird warning message. Ignore it.
+# https://stackoverflow.com/questions/62140483/how-to-interpret-dplyr-message-summarise-regrouping-output-by-x-override
+this_dfCC <- this_dfCC %>% group_by(region, impactparameter, commodity, year, scenario) %>%
+  summarise(Val = mean(Val, na.rm = T)) %>%
+  as.data.frame
+this_dfCCWSRbest <- this_dfCCWSRbest %>% group_by(region, impactparameter, commodity, year, scenario) %>%
+  summarise(Val = mean(Val, na.rm = T)) %>%
+  as.data.frame
+this_dfCCWSRwrst <- this_dfCCWSRwrst %>% group_by(region, impactparameter, commodity, year, scenario) %>%
+  summarise(Val = mean(Val, na.rm = T)) %>%
+  as.data.frame
+
+list_df <- list(this_dfCC, this_dfCCWSRbest, this_dfCCWSRwrst)
+df_out <- as.data.frame(do.call(rbind, list_df))
+
+# df_out <- plyr::join_all(list_df, by = c("region",
+#                                          "impactparameter",
+#                                          "commodity",
+#                                          "year"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+this_commodVec <- unique(c(commodVec_overView, forTotKcalPcap, "-"))
+this_df <- subset(df_raw, impactparameter %in% paramVec &
+                    region %in% regionVec &
+                    commodity %in% this_commodVec)
+df_overView <- process_df(this_df, commodVec_overView, paramVec)
+#rm(df_raw, this_df)
+
+paramsList <- list(supplyParams, demandParams, foodAvailParams)
+for(i in 1:length(paramsList)){
+  this_paramVec <- paramsList[[i]]
+  this_paramVec <- gsub("^.*\\-- ", "", this_paramVec)
+  this_paramVec <- gsub("Total ", "", this_paramVec)
+  this_paramVec <- gsub("PopulationAtRiskXagg - ", "", this_paramVec)
+  this_paramVec[grep("PcKcal", this_paramVec)] <- "Availability\n(kcal/capita/day)"
+  this_paramVec <- gsub("Malnurished", "Undernourished", this_paramVec)
+  paramsList[[i]] <- this_paramVec
+}
+supplyParams <- paramsList[[1]]
+demandParams <- paramsList[[2]]
+foodAvailParams <- paramsList[[3]]
+demandParams <- c("HH Demand Rural",
+                  "HH Demand Urban",
+                  "Export",
+                  "Livestock\nFeed Demand",
+                  "Intermediate Demand",
+                  "Other Demand",
+                  "Total Demand")
+
+colnames(df) <- c("Region", "param", "Commodity", "Year", "Scenario", "Val") 
+df <- subset(df, Year != 2005 & Commodity != "CER")
+
+colnames(df_overView) <- c("Region", "param", "Commodity", "Year", "Scenario", "Val") 
+df_overView <- subset(df_overView, Year != 2005)
+
+#==========================================================================
+# Plotting parameters
+title_size <- 9
+subtitle_size <- 8
+legendText_size <- 8
+axisText_size <- 8
+axisTitle_size <- 8
+facetTitle_size <- 8
+cellText_size <- 3
+#==========================================================================
+theseCommods <- c("Pulses", "Wheat", "Other cereals", "Oilseeds", "Roots & tubers")
