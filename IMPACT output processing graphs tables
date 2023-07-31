@@ -3,13 +3,13 @@ library(tidyverse)
 supplyParams <- c("QSXAgg -- Total Production",
                   "TAreaXAgg -- Total Area",
                   "AnmlNumXAgg -- Animal Numbers",
-                  "AnmlYldXAgg -- Animal Yield",
                   "QMXAgg -- Import",
                   "PPXAgg -- Producer Prices",
                   "PCXAgg -- Consumer Prices",
                   "PEXAgg -- Export Prices",
                   "PWXAgg -- World Prices")
-# "TYldXAgg -- Total Yield",
+# "TYldXAgg -- Total Yield", - to be calculated after aggregation of production and area
+# "AnmlYldXAgg -- Animal Yield", - to be calculated after aggregation of production and area
 
 demandParams <- c("QHDXAgg -- Household Demand",
                   "QEXAgg -- Export",
@@ -23,8 +23,8 @@ foodAvailParams <- c("PerCapKCalXAgg",
                      "PopulationAtRiskXagg - Pop at Risk of Hunger",
                      "TotalMalnourishedXagg -- Malnurished Children",
                      "PopXAgg -- Population")
-# "QMSHXAgg -- Import Share of Demand",
-# "ShareAtRiskXagg -- Share at Risk of Hunger",
+# "QMSHXAgg -- Import Share of Demand", - to be calculated after aggregation of imports and total demand
+# "ShareAtRiskXagg -- Share at Risk of Hunger", - to be calculated after aggregation of population and pop at risk of hunger
 
 # supply_params <- c("Area",
 #                    "Production",
@@ -50,7 +50,8 @@ commodVec <- c("CER-Wheat",
                         "CER",
                         "R&T",
                         "PUL",
-                        "OLS")
+                        "OLS",
+               "AllA")
 
 # forTotKcalPcap <- c("CER", "OLS", "AllA", "R&T",
 #                     "F&V", "PUL", "SGR")
@@ -110,6 +111,8 @@ df$param <- gsub("Malnurished", "Undernourished", df$param)
 # (This is necessary for subsequent aggregation
 # of the kcal availability params - per cap values will be calculated
 # after aggregation)
+# Note that kcal availability is reported in IMPACT only every 5 years
+# The values for other years are NA
 #---
 # First country level
 dfKcalCty <- df %>% subset(param %in% c("Total Availability\n(kcal/capita/day)", "Population")) %>%
@@ -198,11 +201,10 @@ df <- subset(df, !(Country %in% dropVec))
 # This has to be done separately for country-commodity level and country level params
 #---
 # First the easy part - params at country-commodity level
-dfAgg1 <- subset(df, param %in% commodLevParams)
-dfAgg1 <- dfAgg1 %>% group_by(param, scenario,
+dfAgg1 <- df %>% subset(param %in% commodLevParams) %>% group_by(param, scenario,
                               commodity,
                               year, Region) %>%
-  summarize(Val = sum(Val))
+  summarize(Val = sum(Val, na.rm = T)) %>% as.data.frame()
 #---
 # Calculate yields from crops and animals
 # First crops
@@ -239,119 +241,52 @@ dfAgg1 <- as.data.frame(do.call(rbind, list(dfAgg1, dfAggYd, dfAggAnimYd, dfAggI
 rm(dfAggYd, dfAggAnimYd, dfAggISofD)
 #---
 # Now params at country level
-ctyLevParams
-aggVec2 <- setdiff(unique(df$param), aggVec1)
-# Drop yield and import share of demand params as these were just calculated above
-aggVec2 <- aggVec2[-grep("Yield|Import Share of Demand", aggVec2)]
-# Drop share at risk of hunger as this will now be recalculated
-aggVec2 <- aggVec2[-grep("Share at Risk of Hunger", aggVec2)]
-dfAgg2 <- subset(df, param %in% aggVec2)
-# Separate params that have to be summed from params that have to be averaged
-# (The prices are the ones that have to be averaged)
-dfAggPrice <- subset(dfAgg2, param %in% priceParams)
-dfAggPrice <- dfAggPrice %>% group_by(param, scenario,
-                                      commodity, year, Region) %>%
-  summarize(Val = mean(Val)) %>% as.data.frame()
-# Now the sums from country to region level
-dfAgg2 <- dfAgg2 %>% subset(param %in% setdiff(aggVec2, priceParams)) %>%
+# Non price country level params are summed
+dfAgg2sum <- df %>% subset(param %in% ctyLevParams) %>%
   group_by(param, scenario, commodity, year, Region) %>%
-  summarize(Val = sum(Val)) %>% as.data.frame()
-# Recalculate Share at Risk of Hunger
-dfPaRofH <- dfAgg2 %>% subset(param %in% c("Population",
-                                                     "Pop at Risk of Hunger")) %>%
+  summarize(Val = sum(Val, na.rm = T)) %>% as.data.frame()
+# Calculate Share at risk of hunger
+# Note that pop at risk of hunger is reported in IMPACT only every 5 years
+# The values for other years are NA
+dfPaRofH <- dfAgg2sum %>% subset(param %in% c("Pop at Risk of Hunger",
+                                           "Population")) %>%
   spread(param, Val) %>% as.data.frame()
 dfPaRofH$`Share at Risk of Hunger` <- dfPaRofH$`Pop at Risk of Hunger` / dfPaRofH$Population
-dfPaRofH$`Pop at Risk of Hunger` <- NULL; dfPaRofH$Population <- NULL
-colnames(dfPaRofH)[ncol(dfPaRofH)] <- "Val"
-dfPaRofH$param <- "Share at Risk of Hunger"
-dfPaRofH <- dfPaRofH[, colnames(dfAgg2)]
+# Price country level params are averaged
+# Separate out world price b/c it is world-level
+dfWldPrice <- subset(df, param == "World Prices")
+dfWldPrice$Country <- NULL
+dfAgg2mean <- df %>% subset(param %in% priceParams &
+                              param != "World Prices") %>%
+  group_by(param, scenario, commodity, year, Region) %>%
+  summarize(Val = mean(Val, na.rm = T)) %>% as.data.frame()
 # Put it together
-dfAgg2 <- as.data.frame(do.call(rbind, list(dfAgg2, dfAggPrice, dfPaRofH)))
-rm(dfAggPrice, dfPaRofH)
-# Put back together the commodity level and country level dfs
-# Now everything is at region level
-df <- as.data.frame(rbind(dfAgg1, dfAgg2))
-#--------------------------------------------------------------
-
-
+dfAgg2 <- as.data.frame(do.call(rbind, list(dfAgg2sum, dfAgg2mean,
+                                            dfWldPrice)))
+rm(dfAgg2sum, dfAgg2mean, dfWldPrice)
 #---
+df <- as.data.frame(rbind(dfAgg1, dfAgg2))
+#------------------------------------------------------------------
 # Fix commodity names
-df$commodity <- gsub("^.*\\-", "", df$commodity)
-# Rename commodities
 u <- df$commodity
-df$commodity[grep("SGR", u)] <- "Sugar"
 df$commodity[grep("AllA", u)] <- "Animal products"
-#df$commodity[grep("CER", u)] <- "Cereals"
+df$commodity[which(u == "CER")] <- "Cereals"
+df$commodity[which(u == "CER-Wheat")] <- "Wheat"
 df$commodity[grep("R&T", u)] <- "Roots & tubers"
 df$commodity[grep("OLS", u)] <- "Oilseeds"
-df$commodity[grep("OIL", u)] <- "Vegetable oils"
 df$commodity[grep("PUL", u)] <- "Pulses"
-df$commodity[grep("F&V", u)] <- "Fruits &\nvegetables"
-df$commodity[grep("Lamb", u)] <- "Small\nruminants"
-#---
-# Create SSP, RCP, and GCM variables
-#df$SSP <- paste("SSP", i)
-#df$RCP <- NA
-# df$RCP[grep("4.5", df$Scenario)] <- "RCP 4.5"
-# df$RCP[grep("8.5", df$Scenario)] <- "RCP 8.5"
-# df$RCP[grep("NoCC", df$Scenario)] <- "NoCC"
-# df$GCM <- gsub("\\_.*", "", df$Scenario)
-
-df$productiontype <- NULL
-
-df$scenario[grep("NoWSR", df$scenario)] <- "CC No WSR"
-#df$scenario[grep("WSRwrst", df$scenario)] <- "CC+WSR (worst case)"
-df$scenario[grep("wrst", df$scenario)] <- "CC+WSR (worst case)"
+#------------------------------------------------------------------
+# Create scenario names
+u <- df$scenario
+df$scenario[which(u == "NoWSR_ssp2_rcp45_hgem")] <- "CC No WSR"
+df$scenario[which(u == "WSRwrst_ssp2_rcp45_hgem")] <- "CC+WSR (worst case)"
+df$scenario[which(u == "WSRbest_ssp2_rcp45_hgem")] <- "CC+WSR (best case)"
+# Set year to integer
 df$year <- as.integer(df$year)
-dfCC <- subset(df, scenario == "CC No WSR")
-dfCCWSRwrst <- subset(df, scenario == "CC+WSR (worst case)")
-dfCCWSRbest <- subset(df, !(scenario %in% c("CC",
-                                                      "CC+WSR (worst case)")))
-dfCCWSRbest$scenario <- "CC+WSR (best case)"
-# This is throwing a weird warning message. Ignore it.
-# https://stackoverflow.com/questions/62140483/how-to-interpret-dplyr-message-summarise-regrouping-output-by-x-override
-dfCC <- dfCC %>% group_by(region, param, commodity, year, scenario) %>%
-  summarise(Val = mean(Val, na.rm = T)) %>%
-  as.data.frame
-dfCCWSRbest <- dfCCWSRbest %>% group_by(region, param, commodity, year, scenario) %>%
-  summarise(Val = mean(Val, na.rm = T)) %>%
-  as.data.frame
-dfCCWSRwrst <- dfCCWSRwrst %>% group_by(region, param, commodity, year, scenario) %>%
-  summarise(Val = mean(Val, na.rm = T)) %>%
-  as.data.frame
-
-list_df <- list(dfCC, dfCCWSRbest, dfCCWSRwrst)
-df_out <- as.data.frame(do.call(rbind, list_df))
-
-# df_out <- plyr::join_all(list_df, by = c("region",
-#                                          "param",
-#                                          "commodity",
-#                                          "year"))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#==================================================================
+#==================================================================
+#==================================================================
+#==================================================================
 
 
 
