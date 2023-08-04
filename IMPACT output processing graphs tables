@@ -308,6 +308,7 @@ axisText_size <- 8
 axisTitle_size <- 8
 facetTitle_size <- 8
 cellText_size <- 2.25
+fontParams <- c(axisText_size, facetTitle_size, title_size, cellText_size)
 #==================================================================
 # Supply graphics
 supplyParams <- c("Area", "Yield", "Production", "Animal Yield", "Animal Numbers")
@@ -389,81 +390,248 @@ dfWld <- dfWld[, colnames(dfSup)]
 dfSup <- as.data.frame(rbind(dfSup, dfWld))
 #----------------------------------------------------------------
 # Plot tables
-dfPlot <- subset(dfSup, param %in% c("Area", "Production"))
-dfPlot$param[grep("Production", dfPlot$param)] <- "Production (1000 metric tons)"
-dfPlot$param[grep("Area", dfPlot$param)] <- "Area (1000 hectares)"
-# First the global picture area and production best and worst case
-thisTitle <- "Wheat stem rust impact on major crops, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
-dfTab <- subset(dfPlot, Region == "World")
-dfTabTot <- subset(dfTab, commodity == "Total crops")
-dfTab <- subset(dfTab, commodity != "Total crops")
-theseParams <- unique(dfTab$param)
-nParams <- length(theseParams)
-list_gg <- list()
-list_ggTot <- list()
-for(i in nParams){
-  thisParam <- theseParams[i]
-  this_dfTab <- subset(dfTab, param == thisParam)
-  gg <- ggplot(this_dfTab, aes(x = year,
-                          y = commodity,
-                          fill = `WSR-No WSR (Difference)`,
-                          label = `WSR-No WSR (Difference)`))
-  gg <- gg + geom_tile(color = "black")
-  gg <- gg + geom_text(size = cellText_size)
-  gg <- gg + facet_grid(Scenario~param)
-  gg <- gg + scale_fill_gradient2(low = "magenta",
-                                  mid = "white",
-                                  high = "cyan",
-                                  midpoint = 0)
-  gg <- gg + labs(title = thisTitle)
-  gg <- gg + scale_x_continuous(name = "year", limits = c(2025, 2050), breaks=c(2025:2050))
-  gg <- gg + theme_bw()
-  gg <- gg + theme(strip.background = element_rect(fill = "white"),
-                   strip.text = element_text(size = facetTitle_size),
-                   axis.title = element_blank(),
-                   axis.text.y = element_text(size = axisText_size),
-                   axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
-                   legend.position = "none",
-                   panel.grid = element_blank(),
-                   plot.title = element_text(size = title_size))
-  list_gg[[i]] <- gg
-#---
-  thisParam <- theseParams[i]
-  this_dfTabTot <- subset(dfTabTot, param == thisParam)
-  gg <- ggplot(dfTabTot, aes(x = year,
+# Define table plotting fns
+#----------------------------------------------------------------
+# For mult-year single region (world level)
+tabPlot <- function(dfPlotIn,
+                    thisTitle = NULL,
+                    xAxisOn = T,
+                    facetTitleOnX = T,
+                    facetTitleOnY = T,
+                    fontParams
+                    ){
+  axisText_size <- fontParams[1]
+  facetTitle_size <- fontParams[2]
+  title_size <- fontParams[3]
+  cellText_size <- fontParams[4]
+  gg <- ggplot(dfPlotIn, aes(x = year,
                                y = commodity,
                                fill = `WSR-No WSR (Difference)`,
                                label = `WSR-No WSR (Difference)`))
   gg <- gg + geom_tile(color = "black")
   gg <- gg + geom_text(size = cellText_size)
-  gg <- gg + facet_grid(Scenario~param)
+  gg <- gg + facet_grid(param~Scenario)
   gg <- gg + scale_fill_gradient2(low = "magenta",
                                   mid = "white",
                                   high = "cyan",
                                   midpoint = 0)
-  gg <- gg + labs(title = thisTitle)
-  gg <- gg + scale_x_continuous(name = "year", limits = c(2025, 2050), breaks=c(2025:2050))
+  if(!is.null(thisTitle)){gg <- gg + labs(title = thisTitle)}
+  gg <- gg + scale_x_continuous(name = "year", limits = c(2025, 2050), breaks = c(2025:2050))
   gg <- gg + theme_bw()
   gg <- gg + theme(strip.background = element_rect(fill = "white"),
                    strip.text = element_text(size = facetTitle_size),
                    axis.title = element_blank(),
                    axis.text.y = element_text(size = axisText_size),
-                   axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
+                   axis.text.x = element_blank(),
                    legend.position = "none",
                    panel.grid = element_blank(),
                    plot.title = element_text(size = title_size))
-list_ggTot[[i]] <- gg  
-  
-    
+  if(xAxisOn){
+  gg <- gg + theme(axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1))
+  }
+  if(facetTitleOnX == F){
+    gg <- gg + theme(strip.text.x = element_blank())
+  }
+  if(facetTitleOnY == F){
+    gg <- gg + theme(strip.text.y = element_blank())
+  }
+  return(gg)
 }
-wrap_plots(list_gg) + plot_annotation(title = thisTitle) &
+# And for single year multi-region table
+tabPlotReg <- function(dfPlotIn,
+                    thisTitle = NULL,
+                    xAxisOn = T,
+                    facetTitleOnX = T,
+                    facetTitleOnY = T,
+                    fontParams
+){
+  axisText_size <- fontParams[1]
+  facetTitle_size <- fontParams[2]
+  title_size <- fontParams[3]
+  cellText_size <- fontParams[4]
+  gg <- ggplot(dfPlotIn, aes(x = year,
+                             y = commodity,
+                             fill = `WSR-No WSR (Difference)`,
+                             label = `WSR-No WSR (Difference)`))
+  gg <- gg + geom_tile(color = "black")
+  gg <- gg + geom_text(size = cellText_size)
+  gg <- gg + facet_grid(param~Scenario)
+  gg <- gg + scale_fill_gradient2(low = "magenta",
+                                  mid = "white",
+                                  high = "cyan",
+                                  midpoint = 0)
+  if(!is.null(thisTitle)){gg <- gg + labs(title = thisTitle)}
+  gg <- gg + theme_bw()
+  gg <- gg + theme(strip.background = element_rect(fill = "white"),
+                   strip.text = element_text(size = facetTitle_size),
+                   axis.title = element_blank(),
+                   axis.text.y = element_text(size = axisText_size),
+                   axis.text.x = element_blank(),
+                   legend.position = "none",
+                   panel.grid = element_blank(),
+                   plot.title = element_text(size = title_size))
+  if(xAxisOn){
+    gg <- gg + theme(axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1))
+  }
+  if(facetTitleOnX == F){
+    gg <- gg + theme(strip.text.x = element_blank())
+  }
+  if(facetTitleOnY == F){
+    gg <- gg + theme(strip.text.y = element_blank())
+  }
+  return(gg)
+}
+#----------------------------------------------------------------
+dfPlot <- subset(dfSup, param %in% c("Area", "Production"))
+dfPlot$param[grep("Production", dfPlot$param)] <- "Production\n(1000 metric tons)"
+dfPlot$param[grep("Area", dfPlot$param)] <- "Area\n(1000 hectares)"
+# First the global picture area and production best and worst case
+dfTab <- subset(dfPlot, Region == "World")
+# For world level better switch production to units of million MT
+ind <- grep("Production", dfTab$param)
+dfTab$`WSR-No WSR (Difference)`[ind] <- round(dfTab$`WSR-No WSR (Difference)`[ind] * 10^-3, 1)
+dfTab$param[ind] <- "Production\n(Million metric tons)"
+dfTabTot <- subset(dfTab, commodity == "Total crops")
+dfTab <- subset(dfTab, commodity != "Total crops")
+theseParams <- unique(dfTab$param)
+theseScens <- unique(dfTab$Scenario)
+nParams <- length(theseParams)
+nScens <- length(theseScens)
+list_ggi <- list()
+for(i in 1:nScens){
+  thisScen <- theseScens[i]
+  list_ggj <- list()
+  for(j in 1:nParams){
+    thisParam <- theseParams[j]
+    this_dfTab <- subset(dfTab, param == thisParam &
+                           Scenario == thisScen)
+    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
+    ggParam <- tabPlot(this_dfTab,
+                       thisTitle = NULL,
+                       xAxisOn = F,
+                       facetTitleOnX,
+                       facetTitleOnY = T,
+                       fontParams)
+    this_dfTabTot <- subset(dfTabTot, param == thisParam &
+                           Scenario == thisScen)
+    if(j == 2 & i == 1){xAxisOn <- T}else{xAxisOn <- F}
+    ggParamTot <- tabPlot(this_dfTabTot,
+                       thisTitle = NULL,
+                       xAxisOn,
+                       facetTitleOnX = F,
+                       facetTitleOnY = F,
+                       fontParams)
+    ggOut <- ggParam + ggParamTot + plot_layout(ncol = 1, heights = c(3, 1))
+    list_ggj[[j]] <- ggOut
+    # if(j == 1){list_ggj[[j]] <- ggOut}else{
+    #   list_ggj <- c(list(ggOut), list_ggj)
+    # }
+  }
+  #wrap_plots(list_ggj, ncol = 1)
+  
+  if(i == 1){list_ggi <- list_ggj}else{
+    list_ggi <- c(list_ggj, list_ggi)}
+}
+thisTitle <- "Wheat stem rust impact on global crop supply 2025-2050, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
+wrap_plots(list_ggi, ncol = 1) + plot_annotation(title = thisTitle) &
   theme(plot.title = element_text(size = title_size))
-
-
-
-thisFilePath <- paste0(graphicsFolder, "Table_", thisCase, "_", thisParam, ".png")
+thisFilePath <- paste0(graphicsFolder, "Table_supWorld.png")
 ggsave(thisFilePath,
        width = 8, height = 8)
+# # Cumulative summary
+# dfWldCum <- dfPlot %>% subset(Region == "World") %>%
+#   group_by(param, commodity, Scenario) %>%
+#   summarise(`WSR-No WSR (Difference)` = sum(`WSR-No WSR (Difference)`)) %>%
+#   as.data.frame()
+
+# Having idenditifed critical years look at regions for those year(s)
+# Let's look at 2036
+dfTab <- subset(dfPlot, year == 2036 & Region != "World")
+dfTabWld <- subset(dfPlot, year == 2036 & Region == "World")
+for(i in 1:nScens){
+  thisScen <- theseScens[i]
+  list_ggj <- list()
+  for(j in 1:nParams){
+    thisParam <- theseParams[j]
+    this_dfTab <- subset(dfTab, param == thisParam &
+                           Scenario == thisScen)
+    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
+    ggParam <- tabPlotReg(this_dfTab,
+                       thisTitle = NULL,
+                       xAxisOn = F,
+                       facetTitleOnX,
+                       facetTitleOnY = T,
+                       fontParams)
+    this_dfTabTot <- subset(dfTabTot, param == thisParam &
+                              Scenario == thisScen)
+    if(j == 2 & i == 1){xAxisOn <- T}else{xAxisOn <- F}
+    ggParamTot <- tabPlotReg(this_dfTabTot,
+                          thisTitle = NULL,
+                          xAxisOn,
+                          facetTitleOnX = F,
+                          facetTitleOnY = F,
+                          fontParams)
+    ggOut <- ggParam + ggParamTot + plot_layout(ncol = 1, heights = c(3, 1))
+    list_ggj[[j]] <- ggOut
+    
+    
+    
+  }
+  
+}
+
+thisScen <- theseScens[1]
+this_dfTab <- subset(dfTab, Scenario == thisScen)
+
+
+
+tabPlotReg <- function(){
+  
+}
+gg <- ggplot(this_dfTab, aes(x = commodity, y = Region,
+                        fill = `WSR-No WSR (Difference)`,
+                        label = `WSR-No WSR (Difference)`))
+gg <- gg + geom_tile(color = "black")
+gg <- gg + geom_text(size = cellText_size)
+gg <- gg + facet_grid(param~Scenario)
+gg <- gg + scale_fill_gradient2(low = "magenta",
+                                mid = "white",
+                                high = "cyan",
+                                midpoint = 0)
+#gg <- gg + labs(title = thisTitle)
+gg <- gg + scale_x_continuous(name = "year", limits = c(2025, 2050), breaks=c(2025:2050))
+gg <- gg + theme_bw()
+gg <- gg + theme(strip.background = element_rect(fill = "white"),
+                 strip.text = element_text(size = facetTitle_size),
+                 axis.title = element_blank(),
+                 axis.text.y = element_text(size = axisText_size),
+                 axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
+                 legend.position = "none",
+                 panel.grid = element_blank(),
+                 plot.title = element_text(size = title_size))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
