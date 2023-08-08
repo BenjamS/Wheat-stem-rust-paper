@@ -153,6 +153,7 @@ commodLevParams <- c("Total Demand", "Other Demand",
                      "Production", "Area", "Animal Numbers",
                      "Availability\n(kcal/day)",
                      "Intermediate Demand",
+                     "Livestock Feed Demand",
                      "Export", "Import", "Household Demand")
 priceParams <- c("Consumer Prices",
                  "Export Prices",
@@ -615,7 +616,8 @@ ind <- grep("Production", dfWldAvg$param)
 dfWldAvg$`WSR-No WSR (Difference)`[ind] <- round(dfWldAvg$`WSR-No WSR (Difference)`[ind] * 10^-3, 4)
 dfWldAvg$param[ind] <- "Production\n(Million metric tons)"
 dfWldAvg <- dfWldAvg %>% group_by(param, commodity, Scenario) %>%
-    summarise(`Mean WSR-No WSR (Difference)` = mean(`WSR-No WSR (Difference)`)) %>%
+    summarise(`Mean WSR-No WSR (Difference)` = mean(`WSR-No WSR (Difference)`),
+              `Max WSR-No WSR (Difference)` = max(`WSR-No WSR (Difference)`)) %>%
     as.data.frame()
 #---
 # Having idenditifed critical years look at regions for those year(s)
@@ -740,6 +742,7 @@ theseParams <- unique(dfTab$param)
 theseScens <- unique(dfTab$Scenario)
 nParams <- length(theseParams)
 nScens <- length(theseScens)
+fontParams[length(fontParams)] <- cellText_size
 list_ggi <- list()
 for(i in 1:nScens){
   thisScen <- theseScens[i]
@@ -783,10 +786,32 @@ thisFilePath <- paste0(graphicsFolder, "Table_demWorld.png")
 ggsave(thisFilePath,
        width = 8, height = 8)
 
+#-----------------------------------------------------------------
+# Focus on specific year
+dfTab <- subset(dfDem, year == 2036 & Region != "World" &
+                  commodity != "Total crops")
+dfTabWld <- subset(dfDem, year == 2036 & Region == "World" &
+                     commodity != "Total crops")
+fontParams[length(fontParams)] <- 3 #Increase cell text size
+
+
+tabPlotReg(dfTab,
+                       thisTitle = NULL,
+                       xAxisOn = T,
+                       yAxisOn = T,
+                       facetTitleOnX = T,
+                       facetTitleOnY = T,
+                       fontParams
+)
 
 
 
-
+gg <- ggplot(dfTab, aes(x = commodity, y = Region,
+                        fill = `WSR-No WSR (Difference)`,
+                        label = `WSR-No WSR (Difference)`))
+gg <- gg + geom_tile()
+gg <- gg + geom_text()
+gg
 
 
 
