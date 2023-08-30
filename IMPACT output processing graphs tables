@@ -524,7 +524,7 @@ tabPlotReg <- function(dfPlotIn,
 # Define function to ensure consistency in processing of the supply
 # and demand graphic dfs
 # First a sub fn to calculate differences between WSR scenarios and the No-WSR reference scenario
-getScenDiffs <- function(dfIn, theseParams, theseCommods, theseYrs, roundTo = 0){
+getScenDiffs <- function(dfIn, theseParams, theseCommods, theseYrs, roundTo = 5){
   dfOut <- dfIn %>%
     subset(param %in% theseParams &
                    commodity %in% theseCommods &
@@ -547,9 +547,9 @@ getScenDiffs <- function(dfIn, theseParams, theseCommods, theseYrs, roundTo = 0)
 }
 #----------------------------------------------------------------
 # Now a more general processing fn which uses the prev fn
-prep4plotSUPorDEM <- function(dfIn, theseParams, theseCommods, theseYrs){
+prep4plotSUPorDEM <- function(dfIn, theseParams, theseCommods, theseYrs, roundTo = 5){
   # Calculate differences between WSR scenarios and the No-WSR reference scenario
-  dfIn <- getScenDiffs(dfIn, theseParams, theseCommods, theseYrs)
+  dfIn <- getScenDiffs(dfIn, theseParams, theseCommods, theseYrs, roundTo)
   #----------------------------------------------------------------
   # Calculate total crops
   dfTot <- dfIn %>% group_by(param, year, Region, Scenario) %>%
@@ -622,21 +622,21 @@ plotDemBars <- function(dfBar,
 # Supply side impact graphics
 # Get the df required
 theseYrs <- 2025:2050
-theseParams <- c("Area", "Production")
-theseCommods <- c("Wheat", "Other cereals", "Non-cereal\ncrops") # Leave out animal products (WSR impact on animal prods is negligle anyway)
-dfSup <- prep4plotSUPorDEM(df, theseParams, theseCommods, theseYrs)
+theseParams <- c("Area", "Production", "Producer price")
+theseCommods <- c("Wheat", "Other cereals", "Total crops") # Leave out animal products (WSR impact on animal prods is negligle anyway)
+dfSup <- prep4plotSUPorDEM(df, theseParams, theseCommods, theseYrs, roundTo = 2)
 #----------------------------------------------------------------
 # Plot supply tables
-dfPlot <- dfSup
-dfPlot$param[grep("Production", dfPlot$param)] <- "Production\n(1000 metric tons)"
-dfPlot$param[grep("Area", dfPlot$param)] <- "Area\n(1000 hectares)"
+dfPlot <- dfSup %>% subset(Scenario %in% c("Best case (%)", "Worst case (%)"))
+# dfPlot$param[grep("Production", dfPlot$param)] <- "Production\n(1000 metric tons)"
+# dfPlot$param[grep("Area", dfPlot$param)] <- "Area\n(1000 hectares)"
 # First the global picture area and production best and worst case
 dfTab <- subset(dfPlot, Region == "World")
 dfTab$year <- as.character(dfTab$year)
 # For world level better switch production to units of million MT
-ind <- grep("Production", dfTab$param)
-dfTab$`WSR-No WSR (Difference)`[ind] <- round(dfTab$`WSR-No WSR (Difference)`[ind] * 10^-3, 1)
-dfTab$param[ind] <- "Production\n(Million metric tons)"
+# ind <- grep("Production", dfTab$param)
+# dfTab$`WSR-No WSR`[ind] <- round(dfTab$`WSR-No WSR`[ind] * 10^-3, 1)
+# dfTab$param[ind] <- "Production\n(Million metric tons)"
 dfTabTot <- subset(dfTab, commodity == "Total crops")
 dfTab <- subset(dfTab, commodity != "Total crops")
 theseParams <- unique(dfTab$param)
@@ -677,12 +677,13 @@ for(i in 1:nScens){
   # if(i == 1){list_ggi <- list_ggj}else{
   #   list_ggi <- c(list_ggj, list_ggi)}
 }
-thisTitle <- "Wheat stem rust impact on global crop supply 2025-2050, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
-wrap_plots(list_ggi, ncol = 1) + plot_annotation(title = thisTitle) &
-  theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_supWorld.png")
-ggsave(thisFilePath,
-       width = 8, height = 8)
+# #thisTitle <- "Wheat stem rust impact on global crop supply 2025-2050, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
+# wrap_plots(list_ggi, ncol = 1)
+# # + plot_annotation(title = thisTitle) &
+# #   theme(plot.title = element_text(size = title_size))
+# thisFilePath <- paste0(graphicsFolder, "Table_supWorldPctDraft.png")
+# ggsave(thisFilePath,
+#        width = 8, height = 8)
 #---
 # # Cumulative summary
 # dfWldCum <- dfPlot %>% subset(Region == "World") %>%
@@ -690,16 +691,87 @@ ggsave(thisFilePath,
 #   summarise(`WSR-No WSR (Difference)` = sum(`WSR-No WSR (Difference)`)) %>%
 #   as.data.frame()
 #---
-# Get means over 2025-2050 for mention in paper
-dfWldAvg <- dfPlot %>% subset(Region == "World")
-ind <- grep("Production", dfWldAvg$param)
-dfWldAvg$`WSR-No WSR (Difference)`[ind] <- round(dfWldAvg$`WSR-No WSR (Difference)`[ind] * 10^-3, 4)
-dfWldAvg$param[ind] <- "Production\n(Million metric tons)"
-dfWldAvg <- dfWldAvg %>% group_by(param, commodity, Scenario) %>%
-  summarise(`Mean WSR-No WSR (Difference)` = mean(`WSR-No WSR (Difference)`),
-            `Max WSR-No WSR (Difference)` = max(`WSR-No WSR (Difference)`),
-            `Min WSR-No WSR (Difference)` = min(`WSR-No WSR (Difference)`)) %>%
-  as.data.frame()
+# Table of regionally disagg'd means & max/mins over 2025-2050
+dfAvg <- dfSup
+ind <- grep("%", dfAvg$Scenario)
+dfAvg$param[ind] <- paste(dfAvg$param[ind], "(%)")
+dfAvg$Scenario <- gsub(" \\(%\\)", "", dfAvg$Scenario)
+# # dfAvg$`WSR-No WSR`[ind] <- round(dfAvg$`WSR-No WSR`[ind] * 10^-3, 2)
+# # dfWldAvg$param[ind] <- "Production\n(Million metric tons)"
+dfAvg <- dfAvg %>%
+  group_by(Region, param, commodity, Scenario) %>%
+  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
+            `Max WSR-No WSR` = max(`WSR-No WSR`),
+            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
+  as.data.frame() %>%
+  gather(stat, Val, `Mean WSR-No WSR`:`Min WSR-No WSR`)
+dfAvg$Val <- round(dfAvg$Val, 2)
+
+dfTab <- subset(dfAvg, stat == "Mean WSR-No WSR")
+dfTab <- dfTab[grep("%", dfTab$param), ]
+dfTab$param <- gsub(" \\(%\\)", "", dfTab$param)
+colnames(dfTab)[ncol(dfTab)] <- "WSR-No WSR"
+# gg <- ggplot(dfTab, aes(x = commodity, y = Region,
+#                         fill = val, label = val))
+# gg <- gg + geom_tile(color = "black")
+# gg <- gg + geom_text(size = cellText_size)
+# gg <- gg + facet_grid(param~Scenario)
+# gg
+
+# thisCommodOrder <- c("Wheat", "Other\ncereals",
+#                      "Non-cereal\ncrops", "Total crops")
+thisCommodOrder <- c("Wheat", "Other cereals",
+                     "Non-cereal\ncrops", "Total crops")
+factor(commodity, levels = thisCommodOrder)
+
+theseParams <- unique(dfTab$param)
+theseScens <- unique(dfTab$Scenario)
+nParams <- length(theseParams)
+nScens <- length(theseScens)
+list_ggi <- list()
+for(i in 1:nScens){
+  thisScen <- theseScens[i]
+  list_ggj <- list()
+  for(j in 1:nParams){
+    thisParam <- theseParams[j]
+    this_dfTab <- subset(dfTab, param == thisParam &
+                           Scenario == thisScen)
+    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
+    if(i == 1){facetTitleOnY <- T; yAxisOn <- F}
+    else{facetTitleOnY <- F; yAxisOn <- T}
+    ggParam <- tabPlotReg(this_dfTab,
+                          thisTitle = NULL,
+                          xAxisOn = T,
+                          yAxisOn,
+                          facetTitleOnX,
+                          facetTitleOnY,
+                          fontParams)
+    
+    # this_dfTabTot <- subset(dfTabTot, param == thisParam &
+    #                           Scenario == thisScen)
+    # if(j == 2 & i == 1){xAxisOn <- T}else{xAxisOn <- F}
+    # ggParamTot <- tabPlot(this_dfTabTot,
+    #                       thisTitle = NULL,
+    #                       xAxisOn,
+    #                       facetTitleOnX = F,
+    #                       facetTitleOnY = F,
+    #                       fontParams)
+    # ggOut <- ggParam + ggParamTot + plot_layout(ncol = 1, heights = c(3, 1))
+    list_ggj[[j]] <- ggParam
+  }
+  ggj <- wrap_plots(list_ggj, ncol = 1)
+  if(i == 1){list_ggi <- list(ggj)}else{
+    list_ggi <- c(list(ggj), list_ggi)}
+  
+  # if(i == 1){list_ggi <- list_ggj}else{
+  #   list_ggi <- c(list_ggj, list_ggi)}
+}
+wrap_plots(list_ggi, ncol = 2)
+
+
+
+
+
 #---
 # Having idenditifed critical years look at regions for those year(s)
 # Let's look at 2036
@@ -745,9 +817,10 @@ for(i in 1:nScens){
     list_ggi <- c(list(ggj), list_ggi)}
   
 }
-thisTitle <- "Wheat stem rust impact on crop supply by region in 2036, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
-wrap_plots(list_ggi, ncol = 2) + plot_annotation(title = thisTitle) &
-  theme(plot.title = element_text(size = title_size))
+#thisTitle <- "Wheat stem rust impact on crop supply by region in 2036, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
+wrap_plots(list_ggi, ncol = 2)
+# + plot_annotation(title = thisTitle) &
+#   theme(plot.title = element_text(size = title_size))
 thisFilePath <- paste0(graphicsFolder, "Table_supReg.png")
 ggsave(thisFilePath,
        width = 6, height = 7)
@@ -1188,6 +1261,29 @@ ggSup
 thisFilePath <- paste0(graphicsFolder, "Table_supWorld.png")
 ggsave(thisFilePath,
        width = 8, height = 6)
+
+dfWldAvgSup <- dfTab %>% subset(Region == "World") %>%
+  group_by(param, commodity, Scenario) %>%
+  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
+            `Max WSR-No WSR` = max(`WSR-No WSR`),
+            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
+  as.data.frame()
+
+dfWldAvgSupP <- dfP %>% subset(Region == "World") %>%
+  group_by(param, commodity, Scenario) %>%
+  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
+            `Max WSR-No WSR` = max(`WSR-No WSR`),
+            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
+  as.data.frame()
+
+#
+
+
+
+
+
+
+
 
 theseParams <- c("Household Demand", "Export",
                  "Total Demand")
