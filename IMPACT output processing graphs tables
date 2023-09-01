@@ -482,6 +482,7 @@ tabPlotReg <- function(dfPlotIn,
   facetTitle_size <- fontParams[2]
   title_size <- fontParams[3]
   cellText_size <- fontParams[4]
+  
   gg <- ggplot(dfPlotIn, aes(x = commodity,
                              y = Region,
                              fill = `WSR-No WSR`,
@@ -582,13 +583,11 @@ plotDemBars <- function(dfBar,
   axisText_size <- fontParams[1]
   facetTitle_size <- fontParams[2]
   title_size <- fontParams[3]
-  thisCommodOrder <- c("Wheat", "Other\ncereals",
-                       "Non-cereal\ncrops", "Total crops")
   gg <- ggplot(dfBar, aes(x = year,
-                          y = `WSR-No WSR\n(Million metric tons)`))
+                          y = `WSR-No WSR`))
   gg <- gg + geom_bar(stat = "identity", aes(fill = param))
   gg <- gg + scale_x_continuous(breaks = seq(2025, 2050, 1))
-  gg <- gg + facet_grid(factor(commodity, levels = thisCommodOrder)~Scenario, scales = "free_y")
+  gg <- gg + facet_grid(commodity~Scenario, scales = "free_y")
   gg <- gg + scale_fill_manual(values = theseColors)
   gg <- gg + geom_hline(yintercept = 0, color = "violet")
   if(!is.null(thisTitle)){
@@ -603,7 +602,7 @@ plotDemBars <- function(dfBar,
                    legend.position = "none",
                    plot.title = element_text(size = title_size))
   if(legendOn){
-    gg <- gg + theme(legend.position = "bottom",
+    gg <- gg + theme(legend.position = "top",
                      legend.title = element_blank(),
                      legend.text = element_text(size = legendText_size))
   }
@@ -622,83 +621,114 @@ plotDemBars <- function(dfBar,
 # Supply side impact graphics
 # Get the df required
 theseYrs <- 2025:2050
-theseParams <- c("Area", "Production", "Producer price")
-theseCommods <- c("Wheat", "Other cereals", "Total crops") # Leave out animal products (WSR impact on animal prods is negligle anyway)
+theseParams <- c("Area", "Production", "Producer price", "Total supply")
+theseCommods <- c("Wheat", "Other cereals", "Total crops",
+                  "Non-cereal\ncrops")
 dfSup <- prep4plotSUPorDEM(df, theseParams, theseCommods, theseYrs, roundTo = 2)
 #----------------------------------------------------------------
 # Plot supply tables
-dfPlot <- dfSup %>% subset(Scenario %in% c("Best case (%)", "Worst case (%)"))
-# dfPlot$param[grep("Production", dfPlot$param)] <- "Production\n(1000 metric tons)"
-# dfPlot$param[grep("Area", dfPlot$param)] <- "Area\n(1000 hectares)"
-# First the global picture area and production best and worst case
-dfTab <- subset(dfPlot, Region == "World")
+theseScens <- c("Best case (%)", "Worst case (%)")
+theseParams <- c("Production", "Area")
+dfTab <- dfSup %>%
+  subset(Region == "World" &
+           param %in% theseParams &
+           Scenario %in% theseScens &
+           commodity != "Total crops") %>%
+  # mutate(param = gsub("Production", "Production\n(million MT)", param)) %>%
+  # mutate(param = gsub("Area", "Area\n(million ha.)", param)) %>%
+  # mutate(`WSR-No WSR` = `WSR-No WSR` * 10^-3) %>%
+  mutate(Scenario = gsub(" \\(%\\)", "", Scenario)) %>%
+  mutate(`WSR-No WSR` = round(`WSR-No WSR`, 2))
+# indYd <- grep("Yield", dfPlot$param)
+# dfPlot$`WSR-No WSR (Difference)`[indYd] <-
+#   1000 * dfPlot$`WSR-No WSR (Difference)`[indYd]
+# dfPlot$param[indYd] <- "Yield\n(kg/hectare)"
+# gg <- ggplot(dfTabAreaProd, aes(x = year, y = commodity,
+#                                 fill = `WSR-No WSR`,
+#                                 label = `WSR-No WSR`))
+# gg <- gg + geom_tile(color = "black")
+# gg <- gg + geom_text(size = cellText_size)
+# gg <- gg + facet_grid(param~Scenario)
+# gg
+
+dfP <- dfSup %>%
+  subset(Region == "World" &
+           commodity == "Wheat" &
+           param == "Producer price" &
+           Scenario %in% c("Best case (%)", "Worst case (%)")) %>%
+  mutate(Scenario = gsub(" \\(%\\)", "", Scenario)) %>%
+  mutate(commodity = "Wheat\nproducer\nprice") %>%
+  mutate(`WSR-No WSR` = round(`WSR-No WSR`, 2)) %>%
+  mutate(year = as.character(year)) %>%
+  as.data.frame()
+
 dfTab$year <- as.character(dfTab$year)
-# For world level better switch production to units of million MT
-# ind <- grep("Production", dfTab$param)
-# dfTab$`WSR-No WSR`[ind] <- round(dfTab$`WSR-No WSR`[ind] * 10^-3, 1)
-# dfTab$param[ind] <- "Production\n(Million metric tons)"
-dfTabTot <- subset(dfTab, commodity == "Total crops")
-dfTab <- subset(dfTab, commodity != "Total crops")
+#supTitle <- "WSR impact on global supply of wheat and other cereals 2025-2050\nDifference (WSR - No WSR)"
 theseParams <- unique(dfTab$param)
 theseScens <- unique(dfTab$Scenario)
 nParams <- length(theseParams)
 nScens <- length(theseScens)
+# list_ggAreaProd <- list()
+# list_ggP <- list()
 list_ggi <- list()
 for(i in 1:nScens){
   thisScen <- theseScens[i]
-  list_ggj <- list()
-  for(j in 1:nParams){
-    thisParam <- theseParams[j]
-    this_dfTab <- subset(dfTab, param == thisParam &
-                           Scenario == thisScen)
-    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
-    ggParam <- tabPlot(this_dfTab,
-                       thisTitle = NULL,
-                       xAxisOn = F,
-                       facetTitleOnX,
-                       facetTitleOnY = T,
-                       fontParams)
-    this_dfTabTot <- subset(dfTabTot, param == thisParam &
-                              Scenario == thisScen)
-    if(j == 2 & i == 1){xAxisOn <- T}else{xAxisOn <- F}
-    ggParamTot <- tabPlot(this_dfTabTot,
-                          thisTitle = NULL,
-                          xAxisOn,
-                          facetTitleOnX = F,
-                          facetTitleOnY = F,
-                          fontParams)
-    ggOut <- ggParam + ggParamTot + plot_layout(ncol = 1, heights = c(3, 1))
-    list_ggj[[j]] <- ggOut
-  }
-  ggj <- wrap_plots(list_ggj, ncol = 1)
-  if(i == 1){list_ggi <- list(ggj)}else{
-    list_ggi <- c(list(ggj), list_ggi)}
+  this_dfTab <- subset(dfTab, Scenario == thisScen)
+  facetTitleOnX <- T
+  if(i == 2){xAxisOn <- T}else{xAxisOn = F}
+  ggAreaProd <- tabPlot(this_dfTab,
+                        thisTitle = NULL,
+                        xAxisOn = F,
+                        facetTitleOnX,
+                        facetTitleOnY = T,
+                        fontParams)
+  # list_ggAreaProd[[i]] <- ggAreaProd
   
-  # if(i == 1){list_ggi <- list_ggj}else{
-  #   list_ggi <- c(list_ggj, list_ggi)}
+  this_dfLine <- subset(dfP, Scenario == thisScen)
+  gg <- ggplot(this_dfLine, aes(x = year, y = `WSR-No WSR`,
+                                group = 1))
+  gg <- gg + geom_hline(yintercept = 0, color = "magenta")
+  gg <- gg + geom_line()
+  gg <- gg + facet_grid(commodity~Scenario, scales = "free_y")
+  gg <- gg + theme_bw()
+  gg <- gg + theme(axis.title = element_blank(),
+                   axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
+                   axis.text.y = element_text(size = axisText_size),
+                   strip.text.x = element_blank(),
+                   strip.text.y = element_text(size = facetTitle_size),
+                   strip.background = element_rect(fill = "white"))
+  ggP <- gg
+  #  list_ggP[[i]] <- ggP
+  
+  list_ggi[[i]] <- ggAreaProd+ggP+plot_layout(ncol = 1, heights = c(3, 1))
+  
 }
-# #thisTitle <- "Wheat stem rust impact on global crop supply 2025-2050, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
-# wrap_plots(list_ggi, ncol = 1)
-# # + plot_annotation(title = thisTitle) &
-# #   theme(plot.title = element_text(size = title_size))
-# thisFilePath <- paste0(graphicsFolder, "Table_supWorldPctDraft.png")
-# ggsave(thisFilePath,
-#        width = 8, height = 8)
-#---
-# # Cumulative summary
-# dfWldCum <- dfPlot %>% subset(Region == "World") %>%
-#   group_by(param, commodity, Scenario) %>%
-#   summarise(`WSR-No WSR (Difference)` = sum(`WSR-No WSR (Difference)`)) %>%
-#   as.data.frame()
+
+wrap_plots(list_ggi, ncol = 1)
+# ggSup <- wrap_plots(list_ggAreaProd, ncol = 1)# + plot_annotation(title = thisTitle) &
+#   #theme(plot.title = element_text(size = subtitle_size))
+
+thisFilePath <- paste0(graphicsFolder, "Table_supWorld.png")
+ggsave(thisFilePath,
+       width = 8, height = 6)
+
+dfWldAvgSup <- dfTab %>% subset(Region == "World") %>%
+  group_by(param, commodity, Scenario) %>%
+  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
+            `Max WSR-No WSR` = max(`WSR-No WSR`),
+            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
+  as.data.frame()
+
+dfWldAvgSupP <- dfP %>% subset(Region == "World") %>%
+  group_by(param, commodity, Scenario) %>%
+  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
+            `Max WSR-No WSR` = max(`WSR-No WSR`),
+            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
+  as.data.frame()
+
 #---
 # Table of regionally disagg'd means & max/mins over 2025-2050
-dfAvg <- dfSup
-ind <- grep("%", dfAvg$Scenario)
-dfAvg$param[ind] <- paste(dfAvg$param[ind], "(%)")
-dfAvg$Scenario <- gsub(" \\(%\\)", "", dfAvg$Scenario)
-# # dfAvg$`WSR-No WSR`[ind] <- round(dfAvg$`WSR-No WSR`[ind] * 10^-3, 2)
-# # dfWldAvg$param[ind] <- "Production\n(Million metric tons)"
-dfAvg <- dfAvg %>%
+dfAvg <- dfSup %>% subset(param != "Producer price") %>%
   group_by(Region, param, commodity, Scenario) %>%
   summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
             `Max WSR-No WSR` = max(`WSR-No WSR`),
@@ -707,6 +737,88 @@ dfAvg <- dfAvg %>%
   gather(stat, Val, `Mean WSR-No WSR`:`Min WSR-No WSR`)
 dfAvg$Val <- round(dfAvg$Val, 2)
 
+dfAvgSub <- dfSup %>% subset(param != "Producer price" &
+                               year %in% c(2029, 2036, 2045, 2048)) %>%
+  group_by(Region, param, commodity, Scenario) %>%
+  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
+            `Max WSR-No WSR` = max(`WSR-No WSR`),
+            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
+  as.data.frame() %>%
+  gather(stat, Val, `Mean WSR-No WSR`:`Min WSR-No WSR`)
+dfAvgSub$Val <- round(dfAvgSub$Val, 2)
+#---
+# Having idenditifed critical years look at regions for those year(s)
+# Let's look at 2036
+dfTab <- subset(dfSup, year == 2029 &
+                  Scenario %in% c("Best case (%)", "Worst case (%)") &
+                  commodity != "Total crops")
+thisParamOrder <- c("Area", "Production", "Total supply")
+dfTab$param <- factor(dfTab$param,
+                      levels = thisParamOrder)
+dfTab$Region <- gsub("\n", " ", dfTab$Region)
+dfTab$Scenario <- gsub(" \\(%\\)", "", dfTab$Scenario)
+dfTab$commodity <- gsub("Other cereals", "Other\ncereals", dfTab$commodity)
+thisCommodOrder <- c("Wheat", "Other\ncereals",
+                     "Non-cereal\ncrops")
+theseParams <- thisParamOrder#unique(dfTab$param)
+theseScens <- c("Worst case", "Best case") #unique(dfTab$Scenario)
+nParams <- length(theseParams)
+nScens <- length(theseScens)
+#fontParams[length(fontParams)] <- 3 #Increase cell text size
+list_ggi <- list()
+for(i in 1:nScens){
+  thisScen <- theseScens[i]
+  list_ggj <- list()
+  for(j in 1:nParams){
+    thisParam <- theseParams[j]
+    this_dfTab <- subset(dfTab, param == thisParam &
+                           Scenario == thisScen)
+    this_dfTab$commodity <- factor(this_dfTab$commodity,
+                                   levels = thisCommodOrder)
+    if(j == nParams){facetTitleOnY <- T}else{facetTitleOnY <- F}
+    if(i == nScens){facetTitleOnX <- T; xAxisOn <- F}
+    else{facetTitleOnX <- F; xAxisOn <- T}
+    if(j == 1){yAxisOn <- T}else{yAxisOn <- F}
+    ggParam <- tabPlotReg(this_dfTab,
+                          thisTitle = NULL,
+                          xAxisOn,
+                          yAxisOn,
+                          facetTitleOnX,
+                          facetTitleOnY,
+                          fontParams,
+                          switchGridAxes = T)
+    # this_dfTabWld <- subset(dfTabWld, param == thisParam &
+    #                           Scenario == thisScen)
+    # if(j == 2){xAxisOn <- T}else{xAxisOn <- F}
+    # ggParamWld <- tabPlotReg(this_dfTabWld,
+    #                          thisTitle = NULL,
+    #                          xAxisOn,
+    #                          yAxisOn,
+    #                          facetTitleOnX = F,
+    #                          facetTitleOnY = F,
+    #                          fontParams)
+    # ggOut <- ggParam + ggParamWld + plot_layout(ncol = 1, heights = c(8, 1))
+    list_ggj[[j]] <- ggParam
+  }
+  ggj <- wrap_plots(list_ggj, nrow = 1)
+  if(i == 1){list_ggi <- list(ggj)}else{
+    list_ggi <- c(list(ggj), list_ggi)}
+  
+}
+#thisTitle <- "Wheat stem rust impact on crop supply by region in 2036, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
+wrap_plots(list_ggi, nrow = 2)
+# + plot_annotation(title = thisTitle) &
+#   theme(plot.title = element_text(size = title_size))
+thisFilePath <- paste0(graphicsFolder, "Table_supRegPct2036.png")
+ggsave(thisFilePath,
+       width = 7, height = 4)
+
+#---
+
+
+
+
+# Regionally disagg'd supply side mean impacts
 dfTab <- subset(dfAvg, stat == "Mean WSR-No WSR")
 dfTab <- dfTab[grep("%", dfTab$param), ]
 dfTab$param <- gsub(" \\(%\\)", "", dfTab$param)
@@ -718,14 +830,14 @@ colnames(dfTab)[ncol(dfTab)] <- "WSR-No WSR"
 # gg <- gg + facet_grid(param~Scenario)
 # gg
 
-# thisCommodOrder <- c("Wheat", "Other\ncereals",
-#                      "Non-cereal\ncrops", "Total crops")
+dfTab$Region <- gsub("\n", " ", dfTab$Region)
+#thisParamOrder <- c("Area", "Production", "Producer price")
+# dfTab$param <- factor(dfTab$param,
+#                       levels = thisParamOrder)
 thisCommodOrder <- c("Wheat", "Other cereals",
                      "Non-cereal\ncrops", "Total crops")
-factor(commodity, levels = thisCommodOrder)
-
 theseParams <- unique(dfTab$param)
-theseScens <- unique(dfTab$Scenario)
+theseScens <- c("Worst case", "Best case") #unique(dfTab$Scenario)
 nParams <- length(theseParams)
 nScens <- length(theseScens)
 list_ggi <- list()
@@ -736,12 +848,15 @@ for(i in 1:nScens){
     thisParam <- theseParams[j]
     this_dfTab <- subset(dfTab, param == thisParam &
                            Scenario == thisScen)
+    this_dfTab$commodity <- factor(this_dfTab$commodity,
+                                   levels = thisCommodOrder)
     if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
     if(i == 1){facetTitleOnY <- T; yAxisOn <- F}
     else{facetTitleOnY <- F; yAxisOn <- T}
+    if(j == nParams){xAxisOn <- T}else{xAxisOn <- F}
     ggParam <- tabPlotReg(this_dfTab,
                           thisTitle = NULL,
-                          xAxisOn = T,
+                          xAxisOn,
                           yAxisOn,
                           facetTitleOnX,
                           facetTitleOnY,
@@ -767,341 +882,333 @@ for(i in 1:nScens){
   #   list_ggi <- c(list_ggj, list_ggi)}
 }
 wrap_plots(list_ggi, ncol = 2)
-
-
+thisFilePath <- paste0(graphicsFolder, "Table_supRegMeanPct2.png")
+ggsave(thisFilePath,
+       width = 8, height = 6)
 
 
 
 #---
-# Having idenditifed critical years look at regions for those year(s)
-# Let's look at 2036
-dfTab <- subset(dfPlot, year == 2036 & Region != "World" &
-                  commodity != "Total crops")
-dfTabWld <- subset(dfPlot, year == 2036 & Region == "World" &
-                     commodity != "Total crops")
-theseParams <- unique(dfTab$param)
-fontParams[length(fontParams)] <- 3 #Increase cell text size
-list_ggi <- list()
-for(i in 1:nScens){
-  thisScen <- theseScens[i]
-  list_ggj <- list()
-  for(j in 1:nParams){
-    thisParam <- theseParams[j]
-    this_dfTab <- subset(dfTab, param == thisParam &
-                           Scenario == thisScen)
-    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
-    if(i == 1){facetTitleOnY <- T; yAxisOn <- F}
-    else{facetTitleOnY <- F; yAxisOn <- T}
-    ggParam <- tabPlotReg(this_dfTab,
-                          thisTitle = NULL,
-                          xAxisOn = F,
-                          yAxisOn,
-                          facetTitleOnX,
-                          facetTitleOnY,
-                          fontParams)
-    this_dfTabWld <- subset(dfTabWld, param == thisParam &
-                              Scenario == thisScen)
-    if(j == 2){xAxisOn <- T}else{xAxisOn <- F}
-    ggParamWld <- tabPlotReg(this_dfTabWld,
-                             thisTitle = NULL,
-                             xAxisOn,
-                             yAxisOn,
-                             facetTitleOnX = F,
-                             facetTitleOnY = F,
-                             fontParams)
-    ggOut <- ggParam + ggParamWld + plot_layout(ncol = 1, heights = c(8, 1))
-    list_ggj[[j]] <- ggOut
-  }
-  ggj <- wrap_plots(list_ggj, ncol = 1)
-  if(i == 1){list_ggi <- list(ggj)}else{
-    list_ggi <- c(list(ggj), list_ggi)}
-  
-}
-#thisTitle <- "Wheat stem rust impact on crop supply by region in 2036, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
-wrap_plots(list_ggi, ncol = 2)
-# + plot_annotation(title = thisTitle) &
-#   theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_supReg.png")
-ggsave(thisFilePath,
-       width = 6, height = 7)
-#-----------------------------------------------------------------
-# Supply side prices (producer and export prices)
-# In caption or title should be mentioned that prices are in 2005 USD
-thesePrices <- c("Producer price",
-                 "Export price")
-dfP <- getScenDiffs(df,
-                    thesePrices,
-                    theseCommods, theseYrs, roundTo = 2)
-dfP$year <- as.character(dfP$year)
-# gg <- ggplot(dfP, aes(x = year, y = `WSR-No WSR (Difference)`,
-#              group = commodity, color = commodity)) +
-#   geom_line() + facet_grid(Scenario~Region, scales = "free_y")
-# gg
-dfTab <- subset(dfP, Region == "World" &
-                   Scenario == "Best case")
-fontParams[length(fontParams)] <- cellText_size
-ggB <- tabPlot(dfTab,
-        thisTitle = NULL,
-        xAxisOn = T,
-        facetTitleOnX = T,
-        facetTitleOnY = T,
-        fontParams)
-dfTab <- subset(dfP, Region == "World" &
-                   Scenario == "Worst case")
-ggW <- tabPlot(dfTab,
-               thisTitle = NULL,
-               xAxisOn = F,
-               facetTitleOnX = T,
-               facetTitleOnY = T,
-               fontParams)
-thisTitle <- "Wheat stem rust impact on world producer and export prices 2025-2050, best and worst case\nExpressed as difference in 2005 USD (WSR price - No WSR price)"
-# Figure caption should explain that price calculated as value of prod / prod
-wrap_plots(list(ggW, ggB), ncol = 1) + plot_annotation(title = thisTitle) &
-  theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_supPricesWorld.png")
-ggsave(thisFilePath,
-       width = 8, height = 5)
-#---
-# Regionally disaggregated price plot focusing on single year
-dfPlot <- subset(dfP, year == "2036")
-fontParams[1] <- 7 # Decrease axisText_size
-thisTitle <- "Wheat stem rust impact on regional producer and export prices in 2036\nBest and worst case\nExpressed as difference in 2005 USD (WSR price - No WSR price)"
-ggPreg <- tabPlotReg(dfPlot,
-           thisTitle,
-                       xAxisOn = T,
-                       yAxisOn = T,
-                       facetTitleOnX = T,
-                       facetTitleOnY = T,
-                       fontParams)
-# wrap_plots(list_ggi, ncol = 2) + plot_annotation(title = thisTitle) &
-#   theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_supPricesReg.png")
-ggsave(thisFilePath,
-       width = 5.5, height = 5)
-#==================================================================
-# Demand side impact graphics
-# theseParams <- c("Household Demand", "Livestock Feed Demand",
-#                  "Intermediate Demand", "Other Demand", "Export",
-#                  "Total Demand")
-theseParams <- c("Export", "Total Demand")
-dfDem <- prep4plotSUPorDEM(df, theseParams, theseCommods,
-                           theseYrs)
-dfDem$param <- gsub("Total Demand", "Total\nDemand", dfDem$param)
-#---
-# Get summary stats over 2025-2050 for mention in paper
-dfWldAvg <- dfDem %>% group_by(param, commodity, Scenario) %>%
-  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR (Difference)`, na.rm = T),
-            `Max WSR-No WSR` = max(`WSR-No WSR (Difference)`, na.rm = T),
-            `Min WSR-No WSR` = min(`WSR-No WSR (Difference)`, na.rm = T)) %>%
-  as.data.frame()
-#-----------------------------------------------------------------
-# dfPlot <- subset(dfDem, Region == "World" &
-#                    param %in% c("Household Demand", "Total Demand"))
-# # For world level better switch to units of million MT
-# dfPlot$`WSR-No WSR (Difference)` <- round(dfPlot$`WSR-No WSR (Difference)` * 10^-3, 1)
-dfTab <- subset(dfDem, Region == "World")
-dfTab[is.na(dfTab)] <- 0
-dfTab$`WSR-No WSR (Difference)` <- round(dfTab$`WSR-No WSR (Difference)` * 10^-3, 1)
-dfTab$year <- as.character(dfTab$year)
-dfTabTot <- subset(dfTab, commodity == "Total crops")
-dfTab <- subset(dfTab, commodity != "Total crops")
-theseParams <- unique(dfTab$param)
-theseScens <- unique(dfTab$Scenario)
-nParams <- length(theseParams)
-nScens <- length(theseScens)
-fontParams[length(fontParams)] <- cellText_size
-fontParams[1] <- 7
-# thisTitleVec <- paste("Wheat stem rust impact on global crop demand 2025-2050,",
-#                       c("best", "worst"),
-#                       "case\nExpressed as difference in magnitude (WSR - No WSR, million metric tons)")
-list_ggi <- list()
-for(i in 1:nScens){
-  thisScen <- theseScens[i]
-  list_ggj <- list()
-  for(j in 1:nParams){
-    thisParam <- theseParams[j]
-    this_dfTab <- subset(dfTab, param == thisParam &
-                           Scenario == thisScen)
-    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
-    ggParam <- tabPlot(this_dfTab,
-                       thisTitle = NULL,
-                       xAxisOn = F,
-                       facetTitleOnX,
-                       facetTitleOnY = T,
-                       fontParams)
-    this_dfTabTot <- subset(dfTabTot, param == thisParam &
-                              Scenario == thisScen)
-    #if(j == nParams){xAxisOn <- T}else{xAxisOn <- F}
-    if(j == nParams & i == 1){xAxisOn <- T}else{xAxisOn <- F}
-    ggParamTot <- tabPlot(this_dfTabTot,
-                          thisTitle = NULL,
-                          xAxisOn,
-                          facetTitleOnX = F,
-                          facetTitleOnY = F,
-                          fontParams)
-    ggOut <- ggParam + ggParamTot +
-      plot_layout(ncol = 1, heights = c(3, 1))
-    list_ggj[[j]] <- ggOut
-  }
-  ggj <- wrap_plots(list_ggj, ncol = 1) #+
-    # plot_annotation(title = thisTitleVec[i]) &
-    # theme(plot.title = element_text(size = title_size))
-  if(i == 1){list_ggi <- list(ggj)}else{
-    list_ggi <- c(list(ggj), list_ggi)}
-  # if(i == 1){list_ggi <- list_ggj}else{
-  #   list_ggi <- c(list_ggj, list_ggi)}
-}
-# list_ggi[[1]]
-# thisFilePath <- paste0(graphicsFolder, "Table_demWorldWorst.png")
-# ggsave(thisFilePath, width = 8, height = 8)
-# list_ggi[[2]]
-# thisFilePath <- paste0(graphicsFolder, "Table_demWorldBest.png")
-# ggsave(thisFilePath, width = 8, height = 8)
-thisTitle <- "Wheat stem rust impact on global crop demand 2025-2050, best and worst case\nExpressed as difference in million metric tons (WSR - No WSR)"
-wrap_plots(list_ggi, ncol = 1) +
-  plot_annotation(title = thisTitle) &
-  theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_demWorld.png")
-ggsave(thisFilePath, width = 8, height = 6)
-#-----------------------------------------------------------------
-# Focus on specific year
-dfTab <- subset(dfDem, year == 2036 & Region != "World" &
-                  commodity != "Total crops")
-dfTabWld <- subset(dfDem, year == 2036 & Region == "World" &
-                     commodity != "Total crops")
-#fontParams[length(fontParams)] <- 3 #Increase cell text size
-theseParams <- unique(dfTab$param)
-list_ggi <- list()
-for(i in 1:nScens){
-  thisScen <- theseScens[i]
-  list_ggj <- list()
-  for(j in 1:nParams){
-    thisParam <- theseParams[j]
-    this_dfTab <- subset(dfTab, param == thisParam &
-                           Scenario == thisScen)
-    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
-    if(i == 1){facetTitleOnY <- T; yAxisOn <- F}
-    else{facetTitleOnY <- F; yAxisOn <- T}
-    ggParam <- tabPlotReg(this_dfTab,
-                          thisTitle = NULL,
-                          xAxisOn = F,
-                          yAxisOn,
-                          facetTitleOnX,
-                          facetTitleOnY,
-                          fontParams)
-    this_dfTabWld <- subset(dfTabWld, param == thisParam &
-                              Scenario == thisScen)
-    if(j == nParams){xAxisOn <- T}else{xAxisOn <- F}
-    ggParamWld <- tabPlotReg(this_dfTabWld,
-                             thisTitle = NULL,
-                             xAxisOn,
-                             yAxisOn,
-                             facetTitleOnX = F,
-                             facetTitleOnY = F,
-                             fontParams)
-    ggOut <- ggParam + ggParamWld + plot_layout(ncol = 1, heights = c(8, 1))
-    list_ggj[[j]] <- ggOut
-  }
-  ggj <- wrap_plots(list_ggj, ncol = 1)
-  if(i == 1){list_ggi <- list(ggj)}else{
-    list_ggi <- c(list(ggj), list_ggi)}
-  
-}
 
-thisTitle <- "Wheat stem rust impact on crop demand by region in 2036, best and worst case\nExpressed as difference in million metric tons (WSR - No WSR)"
-wrap_plots(list_ggi, ncol = 2) + plot_annotation(title = thisTitle) &
-  theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_demReg.png")
-ggsave(thisFilePath,
-       width = 6, height = 5)
+# dfPlot <- dfSup %>% subset(Scenario %in% theseScens)
+# # dfPlot$param[grep("Production", dfPlot$param)] <- "Production\n(1000 metric tons)"
+# # dfPlot$param[grep("Area", dfPlot$param)] <- "Area\n(1000 hectares)"
+# # First the global picture area and production best and worst case
+# dfTab <- subset(dfPlot, Region == "World" & param != "Total supply")
+# dfTab$year <- as.character(dfTab$year)
+# # For world level better switch production to units of million MT
+# # ind <- grep("Production", dfTab$param)
+# # dfTab$`WSR-No WSR`[ind] <- round(dfTab$`WSR-No WSR`[ind] * 10^-3, 1)
+# # dfTab$param[ind] <- "Production\n(Million metric tons)"
+# dfTabTot <- subset(dfTab, commodity == "Total crops")
+# dfTab <- subset(dfTab, commodity != "Total crops")
+# theseParams <- unique(dfTab$param)
+# theseScens <- unique(dfTab$Scenario)
+# nParams <- length(theseParams)
+# nScens <- length(theseScens)
+# list_ggi <- list()
+# for(i in 1:nScens){
+#   thisScen <- theseScens[i]
+#   list_ggj <- list()
+#   for(j in 1:nParams){
+#     thisParam <- theseParams[j]
+#     this_dfTab <- subset(dfTab, param == thisParam &
+#                            Scenario == thisScen)
+#     if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
+#     ggParam <- tabPlot(this_dfTab,
+#                        thisTitle = NULL,
+#                        xAxisOn = F,
+#                        facetTitleOnX,
+#                        facetTitleOnY = T,
+#                        fontParams)
+#     this_dfTabTot <- subset(dfTabTot, param == thisParam &
+#                               Scenario == thisScen)
+#     if(j == 2 & i == 1){xAxisOn <- T}else{xAxisOn <- F}
+#     ggParamTot <- tabPlot(this_dfTabTot,
+#                           thisTitle = NULL,
+#                           xAxisOn,
+#                           facetTitleOnX = F,
+#                           facetTitleOnY = F,
+#                           fontParams)
+#     ggOut <- ggParam + ggParamTot + plot_layout(ncol = 1, heights = c(3, 1))
+#     list_ggj[[j]] <- ggOut
+#   }
+#   ggj <- wrap_plots(list_ggj, ncol = 1)
+#   if(i == 1){list_ggi <- list(ggj)}else{
+#     list_ggi <- c(list(ggj), list_ggi)}
+#   
+#   # if(i == 1){list_ggi <- list_ggj}else{
+#   #   list_ggi <- c(list_ggj, list_ggi)}
+# }
+# # #thisTitle <- "Wheat stem rust impact on global crop supply 2025-2050, best and worst case\nExpressed as difference in magnitude (WSR - No WSR)"
+# wrap_plots(list_ggi, ncol = 1)
+# # # + plot_annotation(title = thisTitle) &
+# # #   theme(plot.title = element_text(size = title_size))
+# # thisFilePath <- paste0(graphicsFolder, "Table_supWorldPctDraft.png")
+# # ggsave(thisFilePath,
+# #        width = 8, height = 8)
+# #---
+# # # Cumulative summary
+# # dfWldCum <- dfPlot %>% subset(Region == "World") %>%
+# #   group_by(param, commodity, Scenario) %>%
+# #   summarise(`WSR-No WSR (Difference)` = sum(`WSR-No WSR (Difference)`)) %>%
+# #   as.data.frame()
 #-----------------------------------------------------------------
-# Demand side price (consumer price)
-# In caption or title should be mentioned that prices are in 2005 USD
-thesePrices <- c("Consumer price")
-dfP <- getScenDiffs(df,
-                    thesePrices,
-                    theseCommods, theseYrs, roundTo = 2)
-dfP$year <- as.character(dfP$year)
-# gg <- ggplot(dfP, aes(x = year, y = `WSR-No WSR (Difference)`,
-#              group = commodity, color = commodity)) +
-#   geom_line() + facet_grid(Scenario~Region, scales = "free_y")
-# gg
-dfTab <- subset(dfP, Region == "World")# &
-#                  Scenario == "Best case")
-fontParams[length(fontParams)] <- cellText_size
-# gg <- ggplot(dfTab, aes(x = year,
-#                            y = commodity,
-#                            fill = `WSR-No WSR (Difference)`,
-#                            label = `WSR-No WSR (Difference)`))
-# gg <- gg + geom_tile(color = "black")
-# gg <- gg + geom_text(size = cellText_size)
-# gg <- gg + facet_grid(Scenario~param)
-# gg <- gg + scale_fill_gradient2(low = "magenta",
-#                                 mid = "white",
-#                                 high = "cyan",
-#                                 midpoint = 0)
-# if(!is.null(thisTitle)){gg <- gg + labs(title = thisTitle)}
-# #gg <- gg + scale_x_continuous(name = "year", limits = c(2025, 2050), breaks = c(2025:2050))
-# gg <- gg + theme_bw()
-# gg <- gg + theme(strip.background = element_rect(fill = "white"),
-#                  strip.text = element_text(size = facetTitle_size),
-#                  axis.title = element_blank(),
-#                  axis.text.y = element_text(size = axisText_size),
-#                  axis.text.x = element_blank(),
-#                  legend.position = "none",
-#                  panel.grid = element_blank(),
-#                  plot.title = element_text(size = title_size))
-# if(xAxisOn){
-#   gg <- gg + theme(axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 0.65))
-# }
-# if(facetTitleOnX == F){
-#   gg <- gg + theme(strip.text.x = element_blank())
-# }
-# if(facetTitleOnY == F){
-#   gg <- gg + theme(strip.text.y = element_blank())
-# }
-
-gg <- tabPlot(dfTab,
-               thisTitle = NULL,
-               xAxisOn = T,
-               facetTitleOnX = T,
-               facetTitleOnY = T,
-               fontParams,
-               switchGridAxes = T)
+# # Supply side prices (producer and export prices)
+# # In caption or title should be mentioned that prices are in 2005 USD
+# thesePrices <- c("Producer price",
+#                  "Export price")
+# dfP <- getScenDiffs(df,
+#                     thesePrices,
+#                     theseCommods, theseYrs, roundTo = 2)
+# dfP$year <- as.character(dfP$year)
+# # gg <- ggplot(dfP, aes(x = year, y = `WSR-No WSR (Difference)`,
+# #              group = commodity, color = commodity)) +
+# #   geom_line() + facet_grid(Scenario~Region, scales = "free_y")
+# # gg
 # dfTab <- subset(dfP, Region == "World" &
-#                   Scenario == "Worst case")
+#                    Scenario == "Best case")
+# fontParams[length(fontParams)] <- cellText_size
+# ggB <- tabPlot(dfTab,
+#         thisTitle = NULL,
+#         xAxisOn = T,
+#         facetTitleOnX = T,
+#         facetTitleOnY = T,
+#         fontParams)
+# dfTab <- subset(dfP, Region == "World" &
+#                    Scenario == "Worst case")
 # ggW <- tabPlot(dfTab,
 #                thisTitle = NULL,
 #                xAxisOn = F,
 #                facetTitleOnX = T,
 #                facetTitleOnY = T,
 #                fontParams)
-thisTitle <- "Wheat stem rust impact on world consumer prices 2025-2050, best and worst case\nExpressed as difference in 2005 USD (WSR price - No WSR price)"
-# Figure caption should explain that price calculated as value of prod / prod
+# thisTitle <- "Wheat stem rust impact on world producer and export prices 2025-2050, best and worst case\nExpressed as difference in 2005 USD (WSR price - No WSR price)"
+# # Figure caption should explain that price calculated as value of prod / prod
 # wrap_plots(list(ggW, ggB), ncol = 1) + plot_annotation(title = thisTitle) &
 #   theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_demPricesWorld.png")
-ggsave(thisFilePath,
-       width = 8, height = 4)
+# thisFilePath <- paste0(graphicsFolder, "Table_supPricesWorld.png")
+# ggsave(thisFilePath,
+#        width = 8, height = 5)
+# #---
+# # Regionally disaggregated price plot focusing on single year
+# dfPlot <- subset(dfP, year == "2036")
+# fontParams[1] <- 7 # Decrease axisText_size
+# thisTitle <- "Wheat stem rust impact on regional producer and export prices in 2036\nBest and worst case\nExpressed as difference in 2005 USD (WSR price - No WSR price)"
+# ggPreg <- tabPlotReg(dfPlot,
+#            thisTitle,
+#                        xAxisOn = T,
+#                        yAxisOn = T,
+#                        facetTitleOnX = T,
+#                        facetTitleOnY = T,
+#                        fontParams)
+# # wrap_plots(list_ggi, ncol = 2) + plot_annotation(title = thisTitle) &
+# #   theme(plot.title = element_text(size = title_size))
+# thisFilePath <- paste0(graphicsFolder, "Table_supPricesReg.png")
+# ggsave(thisFilePath,
+#        width = 5.5, height = 5)
+#==================================================================
+# Demand side impact graphics
+theseParams <- c("Household Demand",
+                 "Export",
+                 "Other Demand",
+                 "Total Demand")
+dfDem <- prep4plotSUPorDEM(df, theseParams, theseCommods,
+                           theseYrs, roundTo = 2)
+# dfDem$param <- gsub("Total Demand", "Total\nDemand", dfDem$param)
+# dfDem$param <- gsub("Household Demand", "Household\nDemand", dfDem$param)
 #---
-# Regionally disaggregated price plot focusing on single year
-dfPlot <- subset(dfP, year == "2036")
-fontParams[1] <- 7 # Decrease axisText_size
-thisTitle <- "Wheat stem rust impact on regional consumer prices in 2036\nBest and worst case\nExpressed as difference in 2005 USD (WSR price - No WSR price)"
-ggPreg <- tabPlotReg(dfPlot,
-                     thisTitle,
-                     xAxisOn = T,
-                     yAxisOn = T,
-                     facetTitleOnX = T,
-                     facetTitleOnY = T,
-                     fontParams,
-                     switchGridAxes = T)
-# wrap_plots(list_ggi, ncol = 2) + plot_annotation(title = thisTitle) &
-#   theme(plot.title = element_text(size = title_size))
-thisFilePath <- paste0(graphicsFolder, "Table_demPricesReg.png")
+# Get summary stats over 2025-2050 for mention in paper
+# dfWldAvg <- dfDem %>% group_by(param, commodity, Scenario) %>%
+#   summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`, na.rm = T),
+#             `Max WSR-No WSR` = max(`WSR-No WSR`, na.rm = T),
+#             `Min WSR-No WSR` = min(`WSR-No WSR`, na.rm = T)) %>%
+#   as.data.frame()
+#-----------------------------------------------------------------
+# dfPlot <- subset(dfDem, Region == "World" &
+#                    param %in% c("Household Demand", "Total Demand"))
+# # For world level better switch to units of million MT
+# dfPlot$`WSR-No WSR (Difference)` <- round(dfPlot$`WSR-No WSR (Difference)` * 10^-3, 1)
+theseCommods <- c("Wheat", "Other cereals",
+                  "Non-cereal\ncrops")
+theseScens <- c("Best case (%)", "Worst case (%)")
+dfBar <- subset(dfDem, Region == "World" &
+                  Scenario %in% theseScens &
+                  commodity %in% theseCommods &
+                  param != "Total Demand")
+dfBar$Scenario <- gsub(" \\(%\\)", "", dfBar$Scenario)
+#dfBar$commodity <- gsub("Other cereals", "Other")
+thisCommodOrder <- c("Wheat", "Other cereals",
+                     "Non-cereal\ncrops")
+dfBar$commodity <- factor(dfBar$commodity, levels = thisCommodOrder)
+#---
+theseColors <- randomcoloR::distinctColorPalette(k = length(unique(dfBar$param)))
+# demTitle <- "WSR impact on global wheat demand, difference in million metric tons (WSR - No WSR)"
+ggDemWrst <- dfBar %>% subset(Scenario == "Worst case") %>%
+  plotDemBars(theseColors,
+              fontParams,
+              axisTextOnX = T,
+              facetTitleOnY = T,
+              thisTitle = NULL)
+ggDemBest <- dfBar %>% subset(Scenario == "Best case") %>%
+  plotDemBars(theseColors,
+              fontParams,
+              legendOn = T,
+              facetTitleOnY = T,
+              thisTitle = NULL)
+wrap_plots(list(ggDemBest, ggDemWrst), ncol = 1)
+thisFilePath <- paste0(graphicsFolder, "Bar_demWorld.png")
 ggsave(thisFilePath,
-       width = 3, height = 5)
+       width = 7, height = 6)
 
+
+
+# # p_lab <- ggplot() +
+# #   annotate(geom = "text", x = 0, y = 0,
+# #            label = "WSR-No WSR", angle = 90,
+# #            size = 2) +
+# #   coord_cartesian(clip = "off") + theme_void()
+# #thisTitle <- "WSR impact on global wheat demand, difference in million metric tons (WSR - No WSR)"
+# ggDem <- wrap_plots(list(ggDemWrst, ggDemBest), ncol = 1) # + plot_annotation(title = thisTitle) &
+# #theme(plot.title = element_text(size = subtitle_size))
+# # ggDem <- (p_lab | wrap_plots(list(ggDemWrst, ggDemBest), nrow = 2)) +
+# #   plot_layout(widths = c(.025, 1)) + plot_annotation(title = thisTitle) &
+# #   theme(plot.title = element_text(size = subtitle_size))
+# # Save
+# thisFilePath <- paste0(graphicsFolder, "Bar_demWorld.png")
+# ggsave(thisFilePath,
+#        width = 6, height = 4)
+
+# Table format
+# # dfTab[is.na(dfTab)] <- 0
+# # dfTab$`WSR-No WSR` <- round(dfTab$`WSR-No WSR` * 10^-3, 1)
+# dfTab$year <- as.character(dfTab$year)
+# # dfTabTot <- subset(dfTab, commodity == "Total crops")
+# # dfTab <- subset(dfTab, commodity != "Total crops")
+# theseParams <- unique(dfTab$param)
+# theseScens <- unique(dfTab$Scenario)
+# nParams <- length(theseParams)
+# nScens <- length(theseScens)
+# # fontParams[length(fontParams)] <- cellText_size
+# # fontParams[1] <- 7
+# # thisTitleVec <- paste("Wheat stem rust impact on global crop demand 2025-2050,",
+# #                       c("best", "worst"),
+# #                       "case\nExpressed as difference in magnitude (WSR - No WSR, million metric tons)")
+# list_ggi <- list()
+# for(i in 1:nScens){
+#   thisScen <- theseScens[i]
+#   list_ggj <- list()
+#   for(j in 1:nParams){
+#     thisParam <- theseParams[j]
+#     this_dfTab <- subset(dfTab, param == thisParam &
+#                            Scenario == thisScen)
+#     if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
+#     ggParam <- tabPlot(this_dfTab,
+#                        thisTitle = NULL,
+#                        xAxisOn = F,
+#                        facetTitleOnX,
+#                        facetTitleOnY = T,
+#                        fontParams)
+#     this_dfTabTot <- subset(dfTabTot, param == thisParam &
+#                               Scenario == thisScen)
+#     #if(j == nParams){xAxisOn <- T}else{xAxisOn <- F}
+#     # if(j == nParams & i == 1){xAxisOn <- T}else{xAxisOn <- F}
+#     # ggParamTot <- tabPlot(this_dfTabTot,
+#     #                       thisTitle = NULL,
+#     #                       xAxisOn,
+#     #                       facetTitleOnX = F,
+#     #                       facetTitleOnY = F,
+#     #                       fontParams)
+#     # ggOut <- ggParam + ggParamTot +
+#     #   plot_layout(ncol = 1, heights = c(3, 1))
+#     list_ggj[[j]] <- ggParam #ggOut
+#   }
+#   ggj <- wrap_plots(list_ggj, ncol = 1) #+
+#     # plot_annotation(title = thisTitleVec[i]) &
+#     # theme(plot.title = element_text(size = title_size))
+#   if(i == 1){list_ggi <- list(ggj)}else{
+#     list_ggi <- c(list(ggj), list_ggi)}
+#   # if(i == 1){list_ggi <- list_ggj}else{
+#   #   list_ggi <- c(list_ggj, list_ggi)}
+# }
+# # list_ggi[[1]]
+# # thisFilePath <- paste0(graphicsFolder, "Table_demWorldWorst.png")
+# # ggsave(thisFilePath, width = 8, height = 8)
+# # list_ggi[[2]]
+# # thisFilePath <- paste0(graphicsFolder, "Table_demWorldBest.png")
+# # ggsave(thisFilePath, width = 8, height = 8)
+# # thisTitle <- "Wheat stem rust impact on global crop demand 2025-2050, best and worst case\nExpressed as difference in million metric tons (WSR - No WSR)"
+# wrap_plots(list_ggi, ncol = 1)
+# # +
+# #   plot_annotation(title = thisTitle) &
+# #   theme(plot.title = element_text(size = title_size))
+# thisFilePath <- paste0(graphicsFolder, "Table_demWorldDraft.png")
+# ggsave(thisFilePath, width = 8, height = 6)
+#-----------------------------------------------------------------
+# Focus on specific year
+theseScens <- c("Best case (%)", "Worst case (%)")
+dfTab <- subset(dfDem, year == 2036 &
+                  Region != "World" &
+                  Scenario %in% theseScens &
+                  commodity %in% theseCommods &
+                  param != "Other Demand")
+dfTab$Scenario <- gsub(" \\(%\\)", "", dfTab$Scenario)
+dfTab$Region <- gsub("\n", " ", dfTab$Region)
+thisCommodOrder <- c("Wheat", "Other cereals",
+                     "Non-cereal\ncrops")
+dfTab$commodity <- factor(dfTab$commodity, levels = thisCommodOrder)
+# dfTab <- subset(dfTab, year == 2036 & Region != "World" &
+#                   commodity != "Total crops")
+# dfTabWld <- subset(dfDem, year == 2036 & Region == "World" &
+#                      commodity != "Total crops")
+#fontParams[length(fontParams)] <- 3 #Increase cell text size
+theseScens <- unique(dfTab$Scenario)
+theseParams <- unique(dfTab$param)
+list_ggi <- list()
+for(i in 1:nScens){
+  thisScen <- theseScens[i]
+  list_ggj <- list()
+  for(j in 1:nParams){
+    thisParam <- theseParams[j]
+    this_dfTab <- subset(dfTab, param == thisParam &
+                           Scenario == thisScen)
+    if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
+    if(i == 1){facetTitleOnY <- T; yAxisOn <- F}
+    else{facetTitleOnY <- F; yAxisOn <- T}
+    if(j == nParams){xAxisOn <- T}else{xAxisOn <- F}
+    ggParam <- tabPlotReg(this_dfTab,
+                          thisTitle = NULL,
+                          xAxisOn,
+                          yAxisOn,
+                          facetTitleOnX,
+                          facetTitleOnY,
+                          fontParams)
+    # this_dfTabWld <- subset(dfTabWld, param == thisParam &
+    #                           Scenario == thisScen)
+    # if(j == nParams){xAxisOn <- T}else{xAxisOn <- F}
+    # ggParamWld <- tabPlotReg(this_dfTabWld,
+    #                          thisTitle = NULL,
+    #                          xAxisOn,
+    #                          yAxisOn,
+    #                          facetTitleOnX = F,
+    #                          facetTitleOnY = F,
+    #                          fontParams)
+    # ggOut <- ggParam + ggParamWld + plot_layout(ncol = 1, heights = c(8, 1))
+    list_ggj[[j]] <- ggParam
+  }
+  ggj <- wrap_plots(list_ggj, ncol = 1)
+  if(i == 1){list_ggi <- list(ggj)}else{
+    list_ggi <- c(list(ggj), list_ggi)}
+  
+}
+
+#thisTitle <- "Wheat stem rust impact on crop demand by region in 2036, best and worst case\nExpressed as difference in million metric tons (WSR - No WSR)"
+wrap_plots(list_ggi, ncol = 2)
+# + plot_annotation(title = thisTitle) &
+#   theme(plot.title = element_text(size = title_size))
+thisFilePath <- paste0(graphicsFolder, "Table_demRegPct.png")
+ggsave(thisFilePath,
+       width = 6, height = 4)
 #==================================================================
 # Food security impact graphics
 theseParams <- c("Undernourished Children",
@@ -1142,139 +1249,6 @@ theseCommods <- c("Wheat", "Other cereals")#, "Non-cereal\ncrops") # Leave out a
 dfSup <- getScenDiffs(df, theseParams, theseCommods, theseYrs, roundTo = 5)
 #----------------------------------------------------------------
 # Plot supply tables
-dfTab <- dfSup %>%
-  subset(Region == "World" &
-           param %in% c("Production", "Area") &
-           Scenario %in% c("Best case (%)", "Worst case (%)")) %>%
-  # mutate(param = gsub("Production", "Production\n(million MT)", param)) %>%
-  # mutate(param = gsub("Area", "Area\n(million ha.)", param)) %>%
-  # mutate(`WSR-No WSR` = `WSR-No WSR` * 10^-3) %>%
-  mutate(Scenario = gsub(" \\(%\\)", "", Scenario)) %>%
-  mutate(`WSR-No WSR` = round(`WSR-No WSR`, 2))
-# indYd <- grep("Yield", dfPlot$param)
-# dfPlot$`WSR-No WSR (Difference)`[indYd] <-
-#   1000 * dfPlot$`WSR-No WSR (Difference)`[indYd]
-# dfPlot$param[indYd] <- "Yield\n(kg/hectare)"
-# gg <- ggplot(dfTabAreaProd, aes(x = year, y = commodity,
-#                                 fill = `WSR-No WSR`,
-#                                 label = `WSR-No WSR`))
-# gg <- gg + geom_tile(color = "black")
-# gg <- gg + geom_text(size = cellText_size)
-# gg <- gg + facet_grid(param~Scenario)
-# gg
-
-# Global picture area, production, producer price best and worst case
-
-dfP <- dfSup %>%
-  subset(Region == "World" &
-           commodity == "Wheat" &
-           param == "Producer price" &
-           Scenario %in% c("Best case (%)", "Worst case (%)")) %>%
-  mutate(Scenario = gsub(" \\(%\\)", "", Scenario)) %>%
-  mutate(commodity = "Wheat\nproducer\nprice") %>%
-  mutate(`WSR-No WSR` = round(`WSR-No WSR`, 2)) %>%
-  mutate(year = as.character(year))
-  as.data.frame()
-
-
-
-dfTab$year <- as.character(dfTab$year)
-supTitle <- "WSR impact on global supply of wheat and other cereals 2025-2050\nDifference (WSR - No WSR)"
-theseParams <- unique(dfTab$param)
-theseScens <- unique(dfTab$Scenario)
-nParams <- length(theseParams)
-nScens <- length(theseScens)
-# list_ggAreaProd <- list()
-# list_ggP <- list()
-list_ggi <- list()
-for(i in 1:nScens){
-  thisScen <- theseScens[i]
-  this_dfTab <- subset(dfTab, Scenario == thisScen)
-  facetTitleOnX <- T
-  if(i == 2){xAxisOn <- T}else{xAxisOn = F}
-  ggAreaProd <- tabPlot(this_dfTab,
-                     thisTitle = NULL,
-                     xAxisOn = F,
-                     facetTitleOnX,
-                     facetTitleOnY = T,
-                     fontParams)
-  # list_ggAreaProd[[i]] <- ggAreaProd
-
-  this_dfLine <- subset(dfP, Scenario == thisScen)
-  gg <- ggplot(this_dfLine, aes(x = year, y = `WSR-No WSR`,
-                                group = 1))
-  gg <- gg + geom_hline(yintercept = 0, color = "magenta")
-  gg <- gg + geom_line()
-  gg <- gg + facet_grid(commodity~Scenario, scales = "free_y")
-  gg <- gg + theme_bw()
-  gg <- gg + theme(axis.title = element_blank(),
-                   axis.text.x = element_text(size = axisText_size, angle = 60, hjust = 1),
-                   axis.text.y = element_text(size = axisText_size),
-                   strip.text.x = element_blank(),
-                   strip.text.y = element_text(size = facetTitle_size),
-                   strip.background = element_rect(fill = "white"))
-  ggP <- gg
-#  list_ggP[[i]] <- ggP
-  
-  list_ggi[[i]] <- ggAreaProd+ggP+plot_layout(ncol = 1, heights = c(3, 1))
-  
-  # list_ggj <- list()
-  # for(j in 1:nParams){
-  #   thisParam <- theseParams[j]
-  #   this_dfTab <- subset(dfTab, param == thisParam &
-  #                          Scenario == thisScen)
-  #   #if(j == 1 & i == 2){thisTitle = supTitle}else{thisTitle = NULL}
-  #   if(j == nParams & i == 1){xAxisOn = T}else{xAxisOn = F}
-  #   if(j == 1){facetTitleOnX <- T}else{facetTitleOnX <- F}
-  #   ggParam <- tabPlot(this_dfTab,
-  #                      thisTitle = NULL,
-  #                      xAxisOn,
-  #                      facetTitleOnX,
-  #                      facetTitleOnY = T,
-  #                      fontParams)
-  #   # this_dfTabTot <- subset(dfTabTot, param == thisParam &
-  #   #                           Scenario == thisScen)
-  # #   if(j == 2 & i == 1){xAxisOn <- T}else{xAxisOn <- F}
-  # #   ggParamTot <- tabPlot(this_dfTabTot,
-  # #                         thisTitle = NULL,
-  # #                         xAxisOn,
-  # #                         facetTitleOnX = F,
-  # #                         facetTitleOnY = F,
-  # #                         fontParams)
-  # #   ggOut <- ggParam + ggParamTot + plot_layout(ncol = 1, heights = c(3, 1))
-  #   ggOut <- ggParam
-  #    list_ggj[[j]] <- ggOut
-  #  }
-  # ggj <- wrap_plots(list_ggj, ncol = 1)
-  # if(i == 1){list_ggi <- list(ggj)}else{
-  #   list_ggi <- c(list(ggj), list_ggi)}
-  # 
-  # # if(i == 1){list_ggi <- list_ggj}else{
-  # #   list_ggi <- c(list_ggj, list_ggi)}
-}
-
-ggSup <- wrap_plots(list_ggi, ncol = 1)
-# ggSup <- wrap_plots(list_ggAreaProd, ncol = 1)# + plot_annotation(title = thisTitle) &
-#   #theme(plot.title = element_text(size = subtitle_size))
-ggSup
-
-thisFilePath <- paste0(graphicsFolder, "Table_supWorld.png")
-ggsave(thisFilePath,
-       width = 8, height = 6)
-
-dfWldAvgSup <- dfTab %>% subset(Region == "World") %>%
-  group_by(param, commodity, Scenario) %>%
-  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
-            `Max WSR-No WSR` = max(`WSR-No WSR`),
-            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
-  as.data.frame()
-
-dfWldAvgSupP <- dfP %>% subset(Region == "World") %>%
-  group_by(param, commodity, Scenario) %>%
-  summarise(`Mean WSR-No WSR` = mean(`WSR-No WSR`),
-            `Max WSR-No WSR` = max(`WSR-No WSR`),
-            `Min WSR-No WSR` = min(`WSR-No WSR`)) %>%
-  as.data.frame()
 
 #
 
